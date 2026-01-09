@@ -1,0 +1,286 @@
+version: "2"
+
+run:
+  concurrency: 8
+  go: "1.25.5"
+
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - copyloopvar
+    - containedctx
+    - depguard
+    - dupl
+    - forbidigo
+    - funlen
+    - gochecknoinits
+    - gocognit
+    - gocritic
+    - gocyclo
+    - goprintffuncname
+    - gosec
+    - govet
+    - importas
+    - ineffassign
+    - lll
+    - nakedret
+    - nestif
+    - nolintlint
+    - revive
+    - staticcheck
+    - unused
+    - whitespace
+  settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: 'Deprecated: As of Go 1.16, the same functionality is now provided by package `io` or package `os`.'
+    funlen:
+      lines: 240
+      statements: 160
+    gocognit:
+      min-complexity: 30
+    gocritic:
+      enabled-checks:
+        - badLock
+        - badRegexp
+        - badSorting
+        - badSyncOnceFunc
+        - deferInLoop
+        - dynamicFmtString
+        - emptyDecl
+        - filepathJoin
+    gocyclo:
+      min-complexity: 21
+    gosec:
+      excludes:
+        - G115 # too noisy
+    importas:
+      no-unaliased: true
+    lll:
+      line-length: 240
+    nakedret: # Discussions on why naked return can be a problem: https://github.com/golang/go/issues/21291
+      max-func-lines: 2 # few lines with bare return can be fine for some super short logicless functions
+    nestif:
+      min-complexity: 6
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-no-explanation:
+        # the following linters are allowed without explanations because usually there's nothing to explain
+        - errcheck
+        - lll
+    revive:
+      severity: error
+      # See https://github.com/mgechev/revive/blob/master/RULES_DESCRIPTIONS.md
+      rules:
+        - name: atomic
+          disabled: false
+        - name: bare-return
+          disabled: true # covered by nakedret linter
+        - name: blank-imports
+          disabled: false
+        - name: bool-literal-in-expr
+          disabled: false
+        - name: confusing-results
+          disabled: false
+        - name: constant-logical-expr
+          disabled: false
+        - name: context-keys-type
+          disabled: false
+        - name: datarace
+          disabled: false
+        - name: deep-exit
+          disabled: false
+        - name: defer
+          disabled: false
+        - name: dot-imports
+          disabled: false
+        - name: duplicated-imports
+          disabled: false
+        - name: early-return
+          disabled: false
+        - name: empty-block
+          disabled: false
+        - name: empty-lines
+          disabled: false
+        - name: enforce-map-style
+          arguments:
+            - make
+          disabled: false
+        - name: enforce-repeated-arg-type-style
+          arguments:
+            - short
+          disabled: false
+        - name: enforce-slice-style
+          arguments:
+            - make
+          disabled: false
+        - name: error-naming
+          disabled: false
+        - name: error-return
+          disabled: false
+        - name: error-strings
+          disabled: false
+        - name: filename-format
+          arguments:
+            - '^[_a-z][_a-z0-9]*.go$'
+          disabled: false
+        - name: flag-parameter
+          disabled: false
+        - name: function-result-limit
+          arguments:
+            - 3
+          disabled: false
+        - name: get-return
+          disabled: false
+        - name: identical-branches
+          disabled: false
+        - name: import-alias-naming
+          arguments:
+            - # require aliases to be lowercased alphanumeric values (the first symbol is always a letter)
+              allowRegex: '^[a-z][a-z0-9]*$'
+              # disallow v1 (or vN, where N is a number) prefixes
+              denyRegex: '^v\d+$'
+          disabled: false
+        - name: import-shadowing
+          disabled: false
+        - name: increment-decrement
+          disabled: false
+        - name: indent-error-flow
+          arguments:
+            - preserveScope
+          disabled: false
+        - name: modifies-value-receiver
+          disabled: false
+        - name: optimize-operands-order
+          disabled: false
+        - name: range
+          disabled: false
+        - name: receiver-naming
+          arguments:
+            - maxLength: 3
+          disabled: false
+        - name: redefines-builtin-id
+          disabled: false
+        #- name: redundant-build-tag # not supported in golangci-lint
+        #  disabled: false
+        - name: redundant-import-alias
+          disabled: false
+        - name: string-of-int
+          disabled: false
+        - name: struct-tag
+          disabled: false
+        - name: superfluous-else
+          disabled: false
+        - name: time-equal
+          disabled: false
+        - name: unchecked-type-assertion
+          arguments:
+            - acceptIgnoredAssertionResult: true
+          disabled: false
+        - name: unconditional-recursion
+          disabled: false
+        - name: unexported-naming
+          disabled: false
+        - name: unexported-return
+          disabled: false
+        - name: unnecessary-stmt
+          disabled: false
+        - name: unreachable-code
+          disabled: false
+        - name: unused-parameter
+          arguments:
+            - allowRegex: '^_'
+          disabled: false
+        - name: unused-receiver
+          disabled: false
+        - name: use-any
+          disabled: false
+        - name: useless-break
+          disabled: false
+        - name: var-naming
+          disabled: false
+        - name: waitgroup-by-value
+          disabled: false
+    staticcheck:
+      checks:
+        # STxxxx checks in https://staticcheck.io/docs/checks/#ST
+        - all
+        - -QF1008
+        - -ST1000
+        - -ST1003
+        - -ST1005
+        - -ST1016
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: '_test\.go$'
+        linters:
+          - funlen
+          - gocognit
+          - gocritic
+          - gocyclo
+          - lll
+          - nestif
+          - dupl
+      - path: '_test\.go$'
+        text: 'function-result-limit:'
+      - path: '_test\.go$'
+        text: 'bool-literal-in-expr:'
+      - path: '_test\.go$'
+        text: 'unused-parameter:'
+      - path: '_test\.go$'
+        text: 'unchecked-type-assertion:'
+      - path: '_test\.go$'
+        text: 'unexported-naming:'
+      - path: 'cmd/.*\.go$'
+        linters:
+          - gochecknoinits
+      - path: 'cmd/.*\.go$'
+        linters:
+          - forbidigo
+      - path: 'tools/.*\.go$'
+        linters:
+          - forbidigo
+      - path: 'tools/.*\.go$'
+        text: 'deep-exit:'
+      - text: 'var-naming: avoid meaningless package names'
+        linters:
+          - revive
+      - text: 'var-naming: avoid package names that conflict with Go standard library package names'
+        linters:
+          - revive
+    paths:
+      - 'third_party$'
+      - 'builtin$'
+      - 'examples$'
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/go-extras/errx)
+  exclusions:
+    generated: lax
+    paths:
+      - 'third_party$'
+      - 'builtin$'
+      - 'examples$'
