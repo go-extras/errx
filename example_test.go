@@ -3,6 +3,8 @@ package errx_test
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/go-extras/errx"
 )
@@ -249,7 +251,7 @@ func Example_apiHandler() {
 
 	// Output:
 	// HTTP 400: Email is required
-	// Attributes: [field=email]
+	// Attributes: field=email
 }
 
 // ExampleFromAttrMap demonstrates creating attributes from a map
@@ -408,4 +410,38 @@ func Example_apiHandlerWithDefault() {
 	// Output:
 	// displayable error: User not found
 	// internal error: An unexpected error occurred
+}
+
+// ExampleAttrs_ToSlogAttrs demonstrates converting errx.Attrs to slog.Attr for structured logging
+func ExampleAttrs_ToSlogAttrs() {
+	// Create an error with attributes
+	err := errx.WithAttrs("user_id", 123, "action", "delete", "resource", "account")
+	wrappedErr := errx.Wrap("operation failed", err)
+
+	// Extract attributes from the error
+	attrs := errx.ExtractAttrs(wrappedErr)
+
+	// Convert to slog.Attr for use with slog
+	slogAttrs := attrs.ToSlogAttrs()
+
+	// Use with slog logger
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Remove time for consistent output
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	}))
+
+	// Convert []slog.Attr to []any for logger.Error
+	args := make([]any, len(slogAttrs))
+	for i, attr := range slogAttrs {
+		args[i] = attr
+	}
+	logger.Error("operation failed", args...)
+
+	// Output:
+	// level=ERROR msg="operation failed" user_id=123 action=delete resource=account
 }

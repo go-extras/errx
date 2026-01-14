@@ -229,7 +229,7 @@ func handleCreateAccount(w http.ResponseWriter, r *http.Request) {
         if errx.IsDisplayable(err) {
             userMsg = errx.DisplayText(err)
         }
-        
+
         // Log full error internally
         log.Error("account creation failed", "error", err)
         
@@ -263,6 +263,26 @@ if errx.HasAttrs(err) {
     attrs := errx.ExtractAttrs(err)
     log.Error("payment failed", "error", err, "attributes", attrs)
 }
+```
+
+#### Integration with slog
+
+Convert `errx.Attrs` to `[]slog.Attr` for seamless integration with structured logging:
+
+```go
+err := errx.WithAttrs("user_id", 123, "action", "delete")
+attrs := errx.ExtractAttrs(err)
+
+// Convert to slog.Attr
+slogAttrs := attrs.ToSlogAttrs()
+
+// Use with slog
+logger := slog.Default()
+args := make([]any, len(slogAttrs))
+for i, attr := range slogAttrs {
+    args[i] = attr
+}
+logger.Error("operation failed", args...)
 ```
 
 ### Stack Traces (Optional)

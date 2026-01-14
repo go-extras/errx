@@ -3,6 +3,7 @@ package errx_test
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"testing"
 
@@ -613,4 +614,97 @@ func TestHasAttrs_WithMultiError(t *testing.T) {
 	if errx.HasAttrs(multiErrNoAttrs) {
 		t.Error("expected HasAttrs to return false for multi-error without attributed errors")
 	}
+}
+
+func TestAttrs_ToSlogAttrs(t *testing.T) {
+	tests := []struct {
+		name     string
+		attrs    errx.Attrs
+		expected []slog.Attr
+	}{
+		{
+			name: "basic conversion",
+			attrs: errx.Attrs{
+				{Key: "user_id", Value: 123},
+				{Key: "action", Value: "delete"},
+			},
+			expected: []slog.Attr{
+				slog.Any("user_id", 123),
+				slog.Any("action", "delete"),
+			},
+		},
+		{
+			name: "mixed types",
+			attrs: errx.Attrs{
+				{Key: "string", Value: "test"},
+				{Key: "int", Value: 42},
+				{Key: "bool", Value: true},
+				{Key: "float", Value: 3.14},
+			},
+			expected: []slog.Attr{
+				slog.Any("string", "test"),
+				slog.Any("int", 42),
+				slog.Any("bool", true),
+				slog.Any("float", 3.14),
+			},
+		},
+		{
+			name:     "empty attrs",
+			attrs:    errx.Attrs{},
+			expected: nil,
+		},
+		{
+			name:     "nil attrs",
+			attrs:    nil,
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.attrs.ToSlogAttrs()
+
+			if tt.expected == nil {
+				if result != nil {
+					t.Errorf("expected nil, got %v", result)
+				}
+				return
+			}
+
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %d attrs, got %d", len(tt.expected), len(result))
+			}
+
+			for i := range result {
+				if !result[i].Equal(tt.expected[i]) {
+					t.Errorf("attr %d: expected %v, got %v", i, tt.expected[i], result[i])
+				}
+			}
+		})
+	}
+}
+
+func TestAttrs_ToSlogAttrs_Integration(t *testing.T) {
+	// Create an error with attributes
+	err := errx.WithAttrs("user_id", 123, "action", "delete", "timestamp", "2024-01-01")
+
+	// Extract attributes
+	attrs := errx.ExtractAttrs(err)
+	if attrs == nil {
+		t.Fatal("expected non-nil attrs")
+	}
+
+	// Convert to slog.Attr
+	slogAttrs := attrs.ToSlogAttrs()
+	if slogAttrs == nil {
+		t.Fatal("expected non-nil slog attrs")
+	}
+
+	if len(slogAttrs) != 3 {
+		t.Errorf("expected 3 slog attrs, got %d", len(slogAttrs))
+	}
+
+	// Verify the attributes can be used with slog
+	// (This is a compile-time check more than runtime)
+	_ = []any{slogAttrs[0], slogAttrs[1], slogAttrs[2]}
 }

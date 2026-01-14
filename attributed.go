@@ -3,6 +3,7 @@ package errx
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -29,6 +30,27 @@ func (al Attrs) String() string {
 		parts = append(parts, attr.String())
 	}
 	return strings.Join(parts, " ")
+}
+
+// ToSlogAttrs converts errx.Attrs to []slog.Attr for use with structured logging.
+// This enables seamless integration with slog and slog-compatible loggers.
+//
+// Example:
+//
+//	err := errx.WithAttrs("user_id", 123, "action", "delete")
+//	attrs := errx.ExtractAttrs(err)
+//	slogAttrs := attrs.ToSlogAttrs()
+//	slog.Error("operation failed", slogAttrs...)
+func (al Attrs) ToSlogAttrs() []slog.Attr {
+	if len(al) == 0 {
+		return nil
+	}
+
+	result := make([]slog.Attr, len(al))
+	for i, attr := range al {
+		result[i] = slog.Any(attr.Key, attr.Value)
+	}
+	return result
 }
 
 // WithAttrs creates an error with structured attributes for additional context.
@@ -195,7 +217,7 @@ func HasAttrs(err error) bool {
 // consider converting the result to a map with your own collision-handling rules.
 //
 // Returns nil if the error is nil or does not contain any attributes.
-func ExtractAttrs(err error) []Attr {
+func ExtractAttrs(err error) Attrs {
 	if err == nil {
 		return nil
 	}
