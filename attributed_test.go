@@ -708,3 +708,108 @@ func TestAttrs_ToSlogAttrs_Integration(t *testing.T) {
 	// (This is a compile-time check more than runtime)
 	_ = []any{slogAttrs[0], slogAttrs[1], slogAttrs[2]}
 }
+
+func TestAttrs_ToSlogArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		attrs    errx.Attrs
+		expected []any
+	}{
+		{
+			name: "basic conversion",
+			attrs: errx.Attrs{
+				{Key: "user_id", Value: 123},
+				{Key: "action", Value: "delete"},
+			},
+			expected: []any{
+				slog.Any("user_id", 123),
+				slog.Any("action", "delete"),
+			},
+		},
+		{
+			name: "mixed types",
+			attrs: errx.Attrs{
+				{Key: "string", Value: "test"},
+				{Key: "int", Value: 42},
+				{Key: "bool", Value: true},
+				{Key: "float", Value: 3.14},
+			},
+			expected: []any{
+				slog.Any("string", "test"),
+				slog.Any("int", 42),
+				slog.Any("bool", true),
+				slog.Any("float", 3.14),
+			},
+		},
+		{
+			name:     "empty attrs",
+			attrs:    errx.Attrs{},
+			expected: nil,
+		},
+		{
+			name:     "nil attrs",
+			attrs:    nil,
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.attrs.ToSlogArgs()
+
+			if tt.expected == nil {
+				if result != nil {
+					t.Errorf("expected nil, got %v", result)
+				}
+				return
+			}
+
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %d args, got %d", len(tt.expected), len(result))
+			}
+
+			for i := range result {
+				// Convert both to slog.Attr for comparison
+				resultAttr, ok1 := result[i].(slog.Attr)
+				expectedAttr, ok2 := tt.expected[i].(slog.Attr)
+
+				if !ok1 || !ok2 {
+					t.Errorf("arg %d: expected slog.Attr, got %T and %T", i, result[i], tt.expected[i])
+					continue
+				}
+
+				if !resultAttr.Equal(expectedAttr) {
+					t.Errorf("arg %d: expected %v, got %v", i, expectedAttr, resultAttr)
+				}
+			}
+		})
+	}
+}
+
+func TestAttrs_ToSlogArgs_Integration(t *testing.T) {
+	// Create an error with attributes
+	err := errx.WithAttrs("user_id", 123, "action", "delete", "timestamp", "2024-01-01")
+
+	// Extract attributes
+	attrs := errx.ExtractAttrs(err)
+	if attrs == nil {
+		t.Fatal("expected non-nil attrs")
+	}
+
+	// Convert to []any for use with slog.Error
+	slogArgs := attrs.ToSlogArgs()
+	if slogArgs == nil {
+		t.Fatal("expected non-nil slog args")
+	}
+
+	if len(slogArgs) != 3 {
+		t.Errorf("expected 3 slog args, got %d", len(slogArgs))
+	}
+
+	// Verify each element is a slog.Attr
+	for i, arg := range slogArgs {
+		if _, ok := arg.(slog.Attr); !ok {
+			t.Errorf("arg %d: expected slog.Attr, got %T", i, arg)
+		}
+	}
+}

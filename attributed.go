@@ -32,21 +32,49 @@ func (al Attrs) String() string {
 	return strings.Join(parts, " ")
 }
 
-// ToSlogAttrs converts errx.Attrs to []slog.Attr for use with structured logging.
-// This enables seamless integration with slog and slog-compatible loggers.
+// ToSlogAttrs converts errx.Attrs to []slog.Attr for use with slog.Logger.LogAttrs.
+// This is the most efficient way to log attributes with slog, as it avoids allocations
+// and preserves type safety.
+//
+// Use this method when you want to use slog.Logger.LogAttrs or the top-level slog.LogAttrs function.
 //
 // Example:
 //
 //	err := errx.WithAttrs("user_id", 123, "action", "delete")
 //	attrs := errx.ExtractAttrs(err)
 //	slogAttrs := attrs.ToSlogAttrs()
-//	slog.Error("operation failed", slogAttrs...)
+//	logger.LogAttrs(context.Background(), slog.LevelError, "operation failed", slogAttrs...)
 func (al Attrs) ToSlogAttrs() []slog.Attr {
 	if len(al) == 0 {
 		return nil
 	}
 
 	result := make([]slog.Attr, len(al))
+	for i, attr := range al {
+		result[i] = slog.Any(attr.Key, attr.Value)
+	}
+	return result
+}
+
+// ToSlogArgs converts errx.Attrs to []any for use with slog convenience methods.
+// This enables using attributes with slog.Error, slog.Info, slog.Warn, and similar methods
+// that accept alternating key-value pairs.
+//
+// Note: For better performance and type safety, prefer ToSlogAttrs with Logger.LogAttrs.
+// This method is provided for convenience when using the simpler logging methods.
+//
+// Example:
+//
+//	err := errx.WithAttrs("user_id", 123, "action", "delete")
+//	attrs := errx.ExtractAttrs(err)
+//	slogArgs := attrs.ToSlogArgs()
+//	slog.Error("operation failed", slogArgs...)
+func (al Attrs) ToSlogArgs() []any {
+	if len(al) == 0 {
+		return nil
+	}
+
+	result := make([]any, len(al))
 	for i, attr := range al {
 		result[i] = slog.Any(attr.Key, attr.Value)
 	}

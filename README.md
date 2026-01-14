@@ -267,22 +267,38 @@ if errx.HasAttrs(err) {
 
 #### Integration with slog
 
-Convert `errx.Attrs` to `[]slog.Attr` for seamless integration with structured logging:
+Convert `errx.Attrs` for seamless integration with structured logging. Two methods are provided:
+
+**Option 1: `ToSlogAttrs()` - Most efficient (recommended)**
+
+Use with `Logger.LogAttrs` for best performance and type safety:
 
 ```go
 err := errx.WithAttrs("user_id", 123, "action", "delete")
 attrs := errx.ExtractAttrs(err)
 
-// Convert to slog.Attr
+// Convert to []slog.Attr
 slogAttrs := attrs.ToSlogAttrs()
 
-// Use with slog
+// Use with LogAttrs (most efficient)
 logger := slog.Default()
-args := make([]any, len(slogAttrs))
-for i, attr := range slogAttrs {
-    args[i] = attr
-}
-logger.Error("operation failed", args...)
+logger.LogAttrs(context.Background(), slog.LevelError, "operation failed", slogAttrs...)
+```
+
+**Option 2: `ToSlogArgs()` - Convenient**
+
+Use with `Error`, `Info`, `Warn` methods for convenience:
+
+```go
+err := errx.WithAttrs("user_id", 123, "action", "delete")
+attrs := errx.ExtractAttrs(err)
+
+// Convert to []any
+slogArgs := attrs.ToSlogArgs()
+
+// Use with convenience methods
+logger := slog.Default()
+logger.Error("operation failed", slogArgs...)
 ```
 
 ### Stack Traces (Optional)
