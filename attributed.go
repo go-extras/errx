@@ -33,8 +33,8 @@ func (al Attrs) String() string {
 }
 
 // ToSlogAttrs converts errx.Attrs to []slog.Attr for use with slog.Logger.LogAttrs.
-// This is the most efficient way to log attributes with slog, as it avoids allocations
-// and preserves type safety.
+// This is a highly efficient way to log attributes with slog, minimizing allocations
+// compared to alternative approaches while preserving type safety.
 //
 // Use this method when you want to use slog.Logger.LogAttrs or the top-level slog.LogAttrs function.
 //
@@ -58,7 +58,7 @@ func (al Attrs) ToSlogAttrs() []slog.Attr {
 
 // ToSlogArgs converts errx.Attrs to []any for use with slog convenience methods.
 // This enables using attributes with slog.Error, slog.Info, slog.Warn, and similar methods
-// that accept alternating key-value pairs.
+// that accept variadic ...any arguments (such as key-value pairs or slog.Attr values).
 //
 // Note: For better performance and type safety, prefer ToSlogAttrs with Logger.LogAttrs.
 // This method is provided for convenience when using the simpler logging methods.
