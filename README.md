@@ -588,10 +588,13 @@ case errors.Is(err, ErrServer):
 ```go
 // Attach attributes at the point where context is available
 if err != nil {
-    return attrs.Tag(err, 
-        "request_id", reqID,
-        "user_id", userID,
-        "operation", "create_order",
+    return errx.Classify(
+        err,
+        errx.WithAttrs(
+            "request_id", reqID,
+            "user_id", userID,
+            "operation", "create_order",
+        ),
     )
 }
 ```
@@ -685,6 +688,9 @@ Full API documentation is available at [pkg.go.dev/github.com/go-extras/errx](ht
 - **`WithAttrs(keyvals ...any) error`**
   Creates an error with structured key-value attributes.
 
+- **`FromAttrMap(attrs AttrMap) error`**
+  Creates an attributed error from a map of key-value pairs.
+
 #### Error Wrapping
 
 - **`Wrap(message string, err error, sentinels ...error) error`**
@@ -701,11 +707,20 @@ Full API documentation is available at [pkg.go.dev/github.com/go-extras/errx](ht
 - **`DisplayText(err error) string`**
   Extracts the displayable message from an error chain.
 
+- **`DisplayTextDefault(err error, def string) string`**
+  Extracts the displayable message or returns a fallback string when no displayable error is present.
+
 - **`HasAttrs(err error) bool`**
   Checks if an error chain contains structured attributes.
 
 - **`ExtractAttrs(err error) []Attr`**
   Extracts all attributes from an error chain.
+
+- **`(Attrs).ToSlogAttrs() []slog.Attr`**
+  Converts extracted attributes to `[]slog.Attr` for use with `slog.Logger.LogAttrs`.
+
+- **`(Attrs).ToSlogArgs() []any`**
+  Converts extracted attributes to `[]any` for use with slog convenience methods like `Logger.Error`.
 
 ## Use Cases
 

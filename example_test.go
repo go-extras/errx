@@ -58,7 +58,7 @@ func ExampleClassify() {
 	// Is validation error: true
 }
 
-// ExampleNewTag_multipleParents demonstrates creating a tag with multiple parent tags
+// ExampleNewSentinel_multipleParents demonstrates creating a sentinel with multiple parent sentinels
 func ExampleNewSentinel_multipleParents() {
 	// Create independent classification dimensions
 	ErrRetryable := errx.NewSentinel("retryable")
