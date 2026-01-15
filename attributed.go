@@ -3,6 +3,7 @@ package errx
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -29,6 +30,55 @@ func (al Attrs) String() string {
 		parts = append(parts, attr.String())
 	}
 	return strings.Join(parts, " ")
+}
+
+// ToSlogAttrs converts errx.Attrs to []slog.Attr for use with slog.Logger.LogAttrs.
+// This is a highly efficient way to log attributes with slog, minimizing allocations
+// compared to alternative approaches while preserving type safety.
+//
+// Use this method when you want to use slog.Logger.LogAttrs or the top-level slog.LogAttrs function.
+//
+// Example:
+//
+//	err := errx.WithAttrs("user_id", 123, "action", "delete")
+//	attrs := errx.ExtractAttrs(err)
+//	slogAttrs := attrs.ToSlogAttrs()
+//	logger.LogAttrs(context.Background(), slog.LevelError, "operation failed", slogAttrs...)
+func (al Attrs) ToSlogAttrs() []slog.Attr {
+	if len(al) == 0 {
+		return nil
+	}
+
+	result := make([]slog.Attr, len(al))
+	for i, attr := range al {
+		result[i] = slog.Any(attr.Key, attr.Value)
+	}
+	return result
+}
+
+// ToSlogArgs converts errx.Attrs to []any for use with slog convenience methods.
+// This enables using attributes with slog.Error, slog.Info, slog.Warn, and similar methods
+// that accept variadic ...any arguments (such as key-value pairs or slog.Attr values).
+//
+// Note: For better performance and type safety, prefer ToSlogAttrs with Logger.LogAttrs.
+// This method is provided for convenience when using the simpler logging methods.
+//
+// Example:
+//
+//	err := errx.WithAttrs("user_id", 123, "action", "delete")
+//	attrs := errx.ExtractAttrs(err)
+//	slogArgs := attrs.ToSlogArgs()
+//	slog.Error("operation failed", slogArgs...)
+func (al Attrs) ToSlogArgs() []any {
+	if len(al) == 0 {
+		return nil
+	}
+
+	result := make([]any, len(al))
+	for i, attr := range al {
+		result[i] = slog.Any(attr.Key, attr.Value)
+	}
+	return result
 }
 
 // WithAttrs creates an error with structured attributes for additional context.
@@ -195,7 +245,7 @@ func HasAttrs(err error) bool {
 // consider converting the result to a map with your own collision-handling rules.
 //
 // Returns nil if the error is nil or does not contain any attributes.
-func ExtractAttrs(err error) []Attr {
+func ExtractAttrs(err error) Attrs {
 	if err == nil {
 		return nil
 	}

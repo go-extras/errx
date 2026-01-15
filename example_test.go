@@ -1,8 +1,11 @@
 package errx_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/go-extras/errx"
 )
@@ -249,7 +252,7 @@ func Example_apiHandler() {
 
 	// Output:
 	// HTTP 400: Email is required
-	// Attributes: [field=email]
+	// Attributes: field=email
 }
 
 // ExampleFromAttrMap demonstrates creating attributes from a map
@@ -408,4 +411,64 @@ func Example_apiHandlerWithDefault() {
 	// Output:
 	// displayable error: User not found
 	// internal error: An unexpected error occurred
+}
+
+// ExampleAttrs_ToSlogAttrs demonstrates converting errx.Attrs to slog.Attr for use with LogAttrs
+func ExampleAttrs_ToSlogAttrs() {
+	// Create an error with attributes
+	err := errx.WithAttrs("user_id", 123, "action", "delete", "resource", "account")
+	wrappedErr := errx.Wrap("operation failed", err)
+
+	// Extract attributes from the error
+	attrs := errx.ExtractAttrs(wrappedErr)
+
+	// Convert to slog.Attr for use with LogAttrs (most efficient)
+	slogAttrs := attrs.ToSlogAttrs()
+
+	// Use with slog logger's LogAttrs method
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Remove time for consistent output
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	}))
+
+	// LogAttrs accepts ...slog.Attr directly
+	logger.LogAttrs(context.Background(), slog.LevelError, "operation failed", slogAttrs...)
+
+	// Output:
+	// level=ERROR msg="operation failed" user_id=123 action=delete resource=account
+}
+
+// ExampleAttrs_ToSlogArgs demonstrates converting errx.Attrs to []any for use with slog convenience methods
+func ExampleAttrs_ToSlogArgs() {
+	// Create an error with attributes
+	err := errx.WithAttrs("user_id", 123, "action", "delete", "resource", "account")
+	wrappedErr := errx.Wrap("operation failed", err)
+
+	// Extract attributes from the error
+	attrs := errx.ExtractAttrs(wrappedErr)
+
+	// Convert to []any for use with Error/Info/Warn methods
+	slogArgs := attrs.ToSlogArgs()
+
+	// Use with slog logger's convenience methods
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Remove time for consistent output
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	}))
+
+	// Error/Info/Warn methods accept ...any
+	logger.Error("operation failed", slogArgs...)
+
+	// Output:
+	// level=ERROR msg="operation failed" user_id=123 action=delete resource=account
 }
