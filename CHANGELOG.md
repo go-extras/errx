@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ToSlogAttrs()` method for converting `errx.Attrs` to `[]slog.Attr` for efficient slog integration
 - `ToSlogArgs()` method for converting `errx.Attrs` to `[]any` for convenient slog integration
 
+#### Compat Subpackage
+- New `compat` subpackage for standard error interface compatibility
+- `compat.Wrap()` - Wrap errors accepting standard `error` interface for classifications
+- `compat.Classify()` - Classify errors accepting standard `error` interface for classifications
+- Internal conversion from standard errors to `errx.Classified` while preserving error identity
+- Full compatibility with all errx features (sentinels, displayable errors, attributes)
+- Comprehensive documentation explaining design decisions and tradeoffs
+- 16 unit tests + 8 example tests
+- Package README with usage examples and guidance
+
 ## [1.0.0] - TBD
 
 ### Added

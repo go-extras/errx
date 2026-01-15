@@ -19,6 +19,8 @@ Rich error handling with classification tags, displayable messages, and structur
 
 The library is designed for developers building production systems that need sophisticated error handling, clear separation between internal and user-facing errors, and rich contextual information for debugging.
 
+**Flexibility:** The core package uses a type-safe `Classified` interface for maximum safety and clarity. For codebases that prefer working with standard Go `error` interface, the `compat` subpackage provides compatible functions that accept any error type.
+
 **Target audience:** Backend developers, API engineers, and application architects building robust systems with comprehensive error handling requirements.
 
 ## Features
@@ -27,6 +29,7 @@ The library is designed for developers building production systems that need sop
 - ✅ **User-safe displayable messages** separate from internal error details
 - ✅ **Structured attributes** for rich logging and debugging context
 - ✅ **Optional stack traces** via the `stacktrace` subpackage
+- ✅ **Standard error compatibility** via the `compat` subpackage for flexible integration
 - ✅ **Zero dependencies** in core package (stacktrace uses only Go stdlib)
 - ✅ **Well-tested** with comprehensive test coverage
 - ✅ **Simple API** designed for ease of use and composability
@@ -333,6 +336,60 @@ if frames != nil {
 - **Two usage patterns**: Per-error with `Here()` or automatic with `stacktrace.Wrap()`
 
 See the [stacktrace package documentation](https://pkg.go.dev/github.com/go-extras/errx/stacktrace) for more details.
+
+### Standard Error Compatibility (compat package)
+
+The `compat` subpackage provides an alternative API that accepts standard Go `error` interface instead of requiring `errx.Classified` types. This is useful for:
+
+- **Migration**: Easier transition from existing error handling code
+- **Third-party integration**: Working with libraries that use standard errors
+- **Flexibility**: Preferring standard error interface over type-safe classifications
+
+```go
+import (
+    "errors"
+    "github.com/go-extras/errx/compat"
+)
+
+// Define classification errors using standard errors
+var (
+    ErrNotFound   = errors.New("not found")
+    ErrDatabase   = errors.New("database error")
+    ErrValidation = errors.New("validation error")
+)
+
+// Use compat functions with standard errors
+func fetchUser(id string) error {
+    err := db.Query(id)
+    if err != nil {
+        return compat.Wrap("failed to fetch user", err, ErrNotFound, ErrDatabase)
+    }
+    return nil
+}
+
+// Check classifications using standard errors.Is
+if errors.Is(err, ErrNotFound) {
+    // Handle not found case
+}
+```
+
+**Key features:**
+- **Accepts any error type**: Works with `errors.New()`, third-party errors, etc.
+- **Preserves error identity**: `errors.Is()` and `errors.As()` work correctly
+- **Seamless integration**: Can mix standard errors with `errx.Classified` types
+- **Same functionality**: Supports attributes, displayable errors, and all errx features
+
+**Tradeoffs:**
+- ✅ More flexible for codebases using standard error interface
+- ✅ Easier migration path from existing code
+- ⚠️ Less type safety - can accidentally pass non-classification errors
+- ⚠️ Slightly more overhead due to additional wrapping layer
+
+**When to use:**
+- Use `compat` when migrating existing code or integrating with third-party libraries
+- Use the main `errx` package for new code where type safety is preferred
+
+See the [compat package documentation](https://pkg.go.dev/github.com/go-extras/errx/compat) for more details.
 
 ## Complete Example
 
