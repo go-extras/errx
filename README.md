@@ -10,12 +10,13 @@ Rich error handling with classification tags, displayable messages, and structur
 
 ## Overview
 
-`errx` is a powerful error handling library for Go that extends the standard library's error handling with four key capabilities:
+`errx` is a powerful error handling library for Go that extends the standard library's error handling with five key capabilities:
 
 - **Classification Tags**: Categorize errors for programmatic checking without cluttering error messages
 - **Displayable Errors**: Create user-safe messages that can be extracted from error chains
 - **Structured Attributes**: Attach key-value metadata for logging and debugging
 - **Stack Traces** (optional): Capture call stacks for debugging via the `stacktrace` subpackage
+- **JSON Serialization** (optional): Serialize errors to JSON for API responses and logging via the `json` subpackage
 
 The library is designed for developers building production systems that need sophisticated error handling, clear separation between internal and user-facing errors, and rich contextual information for debugging.
 
@@ -29,8 +30,9 @@ The library is designed for developers building production systems that need sop
 - ✅ **User-safe displayable messages** separate from internal error details
 - ✅ **Structured attributes** for rich logging and debugging context
 - ✅ **Optional stack traces** via the `stacktrace` subpackage
+- ✅ **JSON serialization** via the `json` subpackage for API responses and logging
 - ✅ **Standard error compatibility** via the `compat` subpackage for flexible integration
-- ✅ **Zero dependencies** in core package (stacktrace uses only Go stdlib)
+- ✅ **Zero dependencies** in core package (stacktrace and json use only Go stdlib)
 - ✅ **Well-tested** with comprehensive test coverage
 - ✅ **Simple API** designed for ease of use and composability
 - ✅ **Compatible** with standard `errors.Is()` and `errors.As()`
@@ -336,6 +338,49 @@ if frames != nil {
 - **Two usage patterns**: Per-error with `Here()` or automatic with `stacktrace.Wrap()`
 
 See the [stacktrace package documentation](https://pkg.go.dev/github.com/go-extras/errx/stacktrace) for more details.
+
+### JSON Serialization (json package)
+
+The `json` subpackage provides JSON serialization capabilities for errx errors while maintaining the zero-dependency principle of the core package:
+
+```go
+import (
+    "github.com/go-extras/errx"
+    errxjson "github.com/go-extras/errx/json"
+)
+
+// Create a complex error with all features
+displayErr := errx.NewDisplayable("Service temporarily unavailable")
+attrErr := errx.WithAttrs("retry_count", 3, "host", "localhost")
+err := errx.Wrap("database operation failed", displayErr, attrErr, ErrTimeout)
+
+// Serialize to JSON
+jsonBytes, _ := errxjson.Marshal(err)
+
+// Pretty print
+jsonBytes, _ := errxjson.MarshalIndent(err, "", "  ")
+```
+
+**Key features:**
+- **Comprehensive serialization**: Handles all errx error types (sentinels, displayable, attributes, stack traces)
+- **Zero dependencies**: Uses only Go's standard library `encoding/json`
+- **Configurable**: Options for max depth, max stack frames, and filtering
+- **Safe**: Includes circular reference detection and depth limits
+
+**Configuration options:**
+
+```go
+// Limit error chain depth
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithMaxDepth(16))
+
+// Limit stack frames
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithMaxStackFrames(10))
+
+// Exclude standard errors
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithIncludeStandardErrors(false))
+```
+
+See the [json package documentation](https://pkg.go.dev/github.com/go-extras/errx/json) for more details.
 
 ### Standard Error Compatibility (compat package)
 
