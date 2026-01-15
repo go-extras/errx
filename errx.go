@@ -15,6 +15,11 @@
 // from any error chain using DisplayText, which returns just the displayable message
 // without internal context.
 //
+// Attributed Errors: For attaching structured metadata (key-value pairs) to errors for
+// logging and debugging. These attributes can be created using WithAttrs and extracted
+// from any error chain using ExtractAttrs, enabling rich contextual information without
+// cluttering error messages.
+//
 // # When to Use
 //
 // Use Classification sentinels (NewSentinel) when:
@@ -26,6 +31,11 @@
 //   - You need to return user-friendly error messages from APIs
 //   - The error should be safe to display to end users
 //   - You want to separate internal error context from user messages
+//
+// Use Attributed errors (WithAttrs) when:
+//   - You need to attach structured metadata for logging and debugging
+//   - You want to add contextual information like user IDs, request IDs, or operation details
+//   - You're building errors that will be logged with structured logging systems
 //
 // Use Wrap when:
 //   - You need to add context to an error
@@ -61,6 +71,12 @@
 //	    return errx.Classify(err, ErrNotFound)  // Preserves original message
 //	}
 //
+//	// Add structured attributes for logging
+//	func deleteUser(userID int) error {
+//	    attrErr := errx.WithAttrs("user_id", userID, "action", "delete")
+//	    return errx.Wrap("failed to delete user", baseErr, attrErr)
+//	}
+//
 //	// Check for specific errors
 //	if errors.Is(err, ErrNotFound) {
 //	    // Handle not found case
@@ -69,6 +85,11 @@
 //	// Extract displayable message
 //	if errx.IsDisplayable(err) {
 //	    return errx.DisplayText(err)  // Returns: "User not found"
+//	}
+//
+//	// Extract structured attributes for logging
+//	if errx.HasAttrs(err) {
+//	    attrs := errx.ExtractAttrs(err)  // Returns: [{Key: "user_id", Value: 123}, ...]
 //	}
 package errx
 
