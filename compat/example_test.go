@@ -188,4 +188,3 @@ func ExampleClassify_nilCause() {
 	// Output:
 	// Error is nil: true
 }
-

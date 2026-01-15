@@ -100,7 +100,7 @@ func (w *errorWrapper) Unwrap() error {
 	return w.err
 }
 
-func (w *errorWrapper) IsClassified() bool {
+func (*errorWrapper) IsClassified() bool {
 	return true
 }
 
@@ -111,12 +111,12 @@ func toClassified(err error) errx.Classified {
 	if err == nil {
 		return nil
 	}
-	
+
 	// If it's already Classified, return as-is
 	if classified, ok := err.(errx.Classified); ok {
 		return classified
 	}
-	
+
 	// Wrap standard error to make it Classified
 	return &errorWrapper{err: err}
 }
@@ -147,7 +147,7 @@ func Wrap(text string, cause error, classifications ...error) error {
 	if cause == nil {
 		return nil
 	}
-	
+
 	// Convert error classifications to Classified
 	classified := make([]errx.Classified, 0, len(classifications))
 	for _, cls := range classifications {
@@ -155,7 +155,7 @@ func Wrap(text string, cause error, classifications ...error) error {
 			classified = append(classified, c)
 		}
 	}
-	
+
 	return errx.Wrap(text, cause, classified...)
 }
 
@@ -184,7 +184,7 @@ func Classify(cause error, classifications ...error) error {
 	if cause == nil {
 		return nil
 	}
-	
+
 	// Convert error classifications to Classified
 	classified := make([]errx.Classified, 0, len(classifications))
 	for _, cls := range classifications {
@@ -192,7 +192,6 @@ func Classify(cause error, classifications ...error) error {
 			classified = append(classified, c)
 		}
 	}
-	
+
 	return errx.Classify(cause, classified...)
 }
-
