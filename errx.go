@@ -1,5 +1,8 @@
-// Package errx provides error handling utilities with classification sentinels and displayable messages.
-// It enables wrapping errors with classification sentinels that can be checked using errors.Is.
+// Package errx provides rich error handling utilities with classification sentinels,
+// displayable messages, and structured attributes.
+//
+// It enables wrapping errors with classification sentinels that can be checked using errors.Is,
+// attaching user-facing displayable messages, and adding structured metadata for logging.
 //
 // # Core Concepts
 //
@@ -19,6 +22,13 @@
 // logging and debugging. These attributes can be created using WithAttrs and extracted
 // from any error chain using ExtractAttrs, enabling rich contextual information without
 // cluttering error messages.
+//
+// # Subpackages
+//
+// The core package remains zero-dependency. Optional subpackages build on it:
+//   - stacktrace: capture and extract stack traces for errx errors
+//   - json: serialize errx errors and their metadata to JSON
+//   - compat: work with the standard error interface while still using errx classifications
 //
 // # When to Use
 //
