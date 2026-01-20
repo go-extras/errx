@@ -5,84 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-01-15
 
-### Added
-- `ToSlogAttrs()` method for converting `errx.Attrs` to `[]slog.Attr` for efficient slog integration
-- `ToSlogArgs()` method for converting `errx.Attrs` to `[]any` for convenient slog integration
+**First stable release** of errx - a rich error handling library for Go with classification tags, displayable messages, and structured attributes.
 
-#### Compat Subpackage
-- New `compat` subpackage for standard error interface compatibility
-- `compat.Wrap()` - Wrap errors accepting standard `error` interface for classifications
-- `compat.Classify()` - Classify errors accepting standard `error` interface for classifications
-- Internal conversion from standard errors to `errx.Classified` while preserving error identity
-- Full compatibility with all errx features (sentinels, displayable errors, attributes)
-- Comprehensive documentation explaining design decisions and tradeoffs
-- 16 unit tests + 8 example tests
-- Package README with usage examples and guidance
+This release provides a complete, production-ready error handling solution with comprehensive features for building robust Go applications. The library is designed for developers building production systems that need sophisticated error handling, clear separation between internal and user-facing errors, and rich contextual information for debugging.
 
-## [1.0.0] - TBD
+### Core Features
 
-### Added
+#### Error Classification
+- **Sentinel-based classification** - Create error sentinels with `NewSentinel()` for programmatic error checking
+- **Hierarchical sentinels** - Support for parent sentinels to build error taxonomies
+- **Wrap and Classify** - `Wrap()` adds context and classification; `Classify()` adds classification without context
+- **Standard library compatibility** - Full support for `errors.Is()` and `errors.As()`
+- **Extensible interface** - `Classified` interface allows external packages to implement custom error types
 
-#### Core Package
-- `NewSentinel()` - Create classification sentinels for programmatic error checking
-- `Wrap()` - Wrap errors with context and optional classifications
-- `Classify()` - Attach classifications to errors without adding context
-- Hierarchical sentinel support with multiple parent sentinels
-- `NewDisplayable()` - Create user-safe displayable error messages
-- `IsDisplayable()` - Check if error chain contains displayable message
-- `DisplayText()` - Extract displayable message from error chain
-- `DisplayTextDefault()` - Extract displayable message with fallback
-- `WithAttrs()` - Create errors with structured key-value attributes
-- `FromAttrMap()` - Create attributed errors from maps
-- `HasAttrs()` - Check if error contains attributes
-- `ExtractAttrs()` - Extract all attributes from error chain
-- `Classified` interface for extensibility by external packages
-- Support for Go 1.20+ multi-error unwrapping
-- Full compatibility with `errors.Is()` and `errors.As()`
+#### Displayable Messages
+- **User-safe messages** - `NewDisplayable()` creates messages safe to show to end users
+- **Message extraction** - `DisplayText()` and `DisplayTextDefault()` extract displayable messages from error chains
+- **Separation of concerns** - Keep internal error details separate from user-facing messages
 
-#### Stacktrace Subpackage
-- `Here()` - Capture stack trace at current location
-- `Wrap()` - Wrap errors with automatic stack trace capture
-- `Classify()` - Classify errors with automatic stack trace capture
-- `Extract()` - Extract stack frames from error chain
-- Zero-dependency implementation using only Go stdlib
+#### Structured Attributes
+- **Key-value metadata** - `WithAttrs()` attaches structured attributes to errors
+- **Map support** - `FromAttrMap()` creates attributed errors from maps
+- **Attribute extraction** - `ExtractAttrs()` retrieves all attributes from error chain
+- **Logging integration** - `ToSlogAttrs()` and `ToSlogArgs()` for seamless slog integration
 
-#### JSON Subpackage
-- `Marshal()` - Serialize errx errors to JSON
-- `MarshalIndent()` - Serialize with pretty-printing
-- `ToSerializedError()` - Convert to structured format before serialization
-- `WithMaxDepth()` - Configure maximum error chain depth
-- `WithMaxStackFrames()` - Configure maximum stack frames
-- `WithIncludeStandardErrors()` - Control standard error inclusion
-- Comprehensive serialization of sentinels, displayable errors, attributes, and stack traces
-- Circular reference detection
-- Multi-error support
+### Subpackages
 
-### Documentation
-- Comprehensive README with examples and best practices
-- Package-level documentation for all packages
-- 15 runnable example tests
-- Subpackage READMEs (stacktrace, json)
-- WARP.md for AI assistant guidance
+#### stacktrace - Optional Stack Trace Support
+- **Opt-in stack traces** - `Here()` captures stack trace at specific locations
+- **Automatic capture** - `stacktrace.Wrap()` and `stacktrace.Classify()` with automatic stack trace capture
+- **Stack extraction** - `Extract()` retrieves stack frames from error chain
+- **Zero dependencies** - Uses only Go standard library
 
-### Testing
-- 93.1% test coverage in core package
-- 85.4% test coverage in json subpackage
-- 83.8% test coverage in stacktrace subpackage
-- Comprehensive benchmark suite
-- Race detection enabled in CI
-- External implementation tests
+#### json - JSON Serialization
+- **Comprehensive serialization** - `Marshal()` and `MarshalIndent()` for JSON output
+- **Configurable options** - Control depth, stack frames, and standard error inclusion
+- **Safe serialization** - Circular reference detection and depth limits
+- **Zero dependencies** - Uses only Go standard library
+
+#### compat - Standard Error Interface Compatibility
+- **Standard error support** - `compat.Wrap()` and `compat.Classify()` accept any `error` type
+- **Migration friendly** - Easier transition from existing error handling code
+- **Full feature support** - Works with all errx features (sentinels, displayable, attributes)
+- **Preserved identity** - Maintains `errors.Is()` and `errors.As()` compatibility
+
+### Documentation & Testing
+
+- **Comprehensive documentation** - Detailed README with examples and best practices
+- **Package documentation** - Complete API documentation for all packages
+- **Example tests** - 15+ runnable examples demonstrating all features
+- **High test coverage** - 93.1% (core), 85.4% (json), 83.8% (stacktrace), 100% (compat)
+- **Benchmark suite** - Performance benchmarks for all major operations
+- **Contributing guide** - Clear guidelines for contributors
 
 ### Infrastructure
-- GitHub Actions CI/CD pipeline
-- golangci-lint with strict configuration
-- govulncheck security scanning
-- Issue templates (bug report, feature request, question)
-- Pull request template
-- Contributing guidelines
 
-[Unreleased]: https://github.com/go-extras/errx/compare/v1.0.0...HEAD
+- **CI/CD pipeline** - GitHub Actions with comprehensive testing
+- **Code quality** - golangci-lint with strict configuration
+- **Security scanning** - govulncheck for vulnerability detection
+- **Issue templates** - Bug reports, feature requests, and questions
+- **Pull request template** - Standardized PR process
+
 [1.0.0]: https://github.com/go-extras/errx/releases/tag/v1.0.0
 
