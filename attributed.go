@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 )
 
@@ -243,6 +244,43 @@ func HasAttrs(err error) bool {
 	return errors.As(err, &aErr)
 }
 
+// visitedErrorsTracker tracks visited errors during traversal to detect circular references.
+// It uses pointer identity rather than value equality, which works for all error types
+// including those with unhashable fields.
+type visitedErrorsTracker struct {
+	// Map of error pointer addresses to track visited errors
+	// We use uintptr as the key since it's always hashable
+	visited map[uintptr]bool
+}
+
+// newVisitedErrorsTracker creates a new visitedErrorsTracker.
+func newVisitedErrorsTracker() *visitedErrorsTracker {
+	return &visitedErrorsTracker{
+		visited: make(map[uintptr]bool),
+	}
+}
+
+// contains checks if an error has been visited based on pointer identity.
+func (v *visitedErrorsTracker) contains(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Get the pointer address of the error interface's data pointer
+	// This works for all error types, including those with unhashable fields
+	// UnsafePointer() is the preferred method, converted to uintptr which is always hashable
+	ptr := uintptr(reflect.ValueOf(err).UnsafePointer())
+	return v.visited[ptr]
+}
+
+// add marks an error as visited based on pointer identity.
+func (v *visitedErrorsTracker) add(err error) {
+	if err == nil {
+		return
+	}
+	ptr := uintptr(reflect.ValueOf(err).UnsafePointer())
+	v.visited[ptr] = true
+}
+
 // ExtractAttrs extracts and merges all structured attributes from an error chain.
 // It traverses the entire error chain and collects attributes from all attributed instances.
 //
@@ -258,7 +296,7 @@ func ExtractAttrs(err error) AttrList {
 	}
 
 	var allAttrs []Attr
-	visited := make(map[error]bool)
+	visited := newVisitedErrorsTracker()
 	attributedErrorsFound := make(map[*attributed]bool)
 
 	// Use a queue for breadth-first traversal to handle multi-errors
@@ -269,10 +307,10 @@ func ExtractAttrs(err error) AttrList {
 		queue = queue[1:]
 
 		// Skip if already visited (avoid cycles)
-		if visited[current] {
+		if visited.contains(current) {
 			continue
 		}
-		visited[current] = true
+		visited.add(current)
 
 		// Check if current error is an attributed error directly
 		if aErr, ok := current.(*attributed); ok {

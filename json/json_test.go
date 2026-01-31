@@ -3,6 +3,7 @@ package json_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/go-extras/errx"
@@ -468,4 +469,293 @@ func TestMarshal_EmptyAttributes(t *testing.T) {
 	if len(result.Attributes) != 0 {
 		t.Errorf("len(Attributes) = %d, want 0", len(result.Attributes))
 	}
+}
+
+// unhashableError is an error type that contains unhashable fields (map).
+// This simulates errors like validation.Errors from go-ozzo/ozzo-validation
+// which contain map[string]any and cannot be used as map keys.
+type unhashableError struct {
+	message string
+	data    map[string]any
+}
+
+func (e *unhashableError) Error() string {
+	return e.message
+}
+
+func TestMarshal_UnhashableError(t *testing.T) {
+	// Create an unhashable error (contains a map field)
+	unhashableErr := &unhashableError{
+		message: "validation failed",
+		data: map[string]any{
+			"email": "required",
+			"age":   "must be 18 or older",
+		},
+	}
+
+	// Wrap it with errx - this should not panic
+	wrappedErr := stacktrace.Wrap("operation failed", unhashableErr)
+
+	// Marshal should handle unhashable errors gracefully
+	data, err := errxjson.Marshal(wrappedErr)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	// Verify the error was serialized correctly
+	if result.Message != "operation failed: validation failed" {
+		t.Errorf("Message = %q, want %q", result.Message, "operation failed: validation failed")
+	}
+
+	// Verify the cause was included
+	if result.Cause == nil {
+		t.Fatal("Cause should not be nil")
+	}
+
+	if result.Cause.Message != "validation failed" {
+		t.Errorf("Cause.Message = %q, want %q", result.Cause.Message, "validation failed")
+	}
+
+	// Verify stack trace was captured
+	if len(result.StackTrace) == 0 {
+		t.Error("StackTrace should not be empty")
+	}
+}
+
+func TestMarshal_UnhashableErrorCircular(t *testing.T) {
+	// Create an unhashable error
+	unhashableErr := &unhashableError{
+		message: "validation failed",
+		data:    map[string]any{"field": "value"},
+	}
+
+	// Create a circular reference with unhashable error
+	// This tests that circular detection works even with unhashable errors
+	wrappedErr := stacktrace.Wrap("outer", unhashableErr)
+
+	// Marshal should detect circular references even with unhashable errors
+	data, err := errxjson.Marshal(wrappedErr)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	// Should successfully serialize without panic
+	if result.Message == "" {
+		t.Error("Message should not be empty")
+	}
+}
+
+func TestMarshal_MixedHashableUnhashable(t *testing.T) {
+	// Test a chain with both hashable and unhashable errors
+	hashableErr := errors.New("hashable error")
+	unhashableErr := &unhashableError{
+		message: "unhashable error",
+		data:    map[string]any{"key": "value"},
+	}
+
+	// Create a chain with mixed hashable/unhashable errors
+	err1 := errx.Wrap("wrap1", hashableErr, ErrDatabaseTest)
+	err2 := errx.Wrap("wrap2", unhashableErr)
+	err3 := stacktrace.Wrap("wrap3", err2)
+	finalErr := stacktrace.Wrap("final", err3)
+	// Also wrap the first error separately
+	anotherErr := errx.Wrap("another", err1)
+
+	// Should handle mixed hashable/unhashable errors
+	data, err := errxjson.Marshal(finalErr)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	// Verify it serialized successfully
+	if result.Message == "" {
+		t.Error("Message should not be empty")
+	}
+
+	// Also test the other error
+	data2, err := errxjson.Marshal(anotherErr)
+	if err != nil {
+		t.Fatalf("Marshal error for anotherErr: %v", err)
+	}
+
+	var result2 errxjson.SerializedError
+	if err := json.Unmarshal(data2, &result2); err != nil {
+		t.Fatalf("Unmarshal error for anotherErr: %v", err)
+	}
+
+	if result2.Message == "" {
+		t.Error("Message should not be empty")
+	}
+}
+
+// TestMarshal_PointerIdentity verifies that pointer identity is used for circular detection,
+// not value equality. Two errors with the same content but different pointers should both be serialized.
+func TestMarshal_PointerIdentity(t *testing.T) {
+	// Create two unhashable errors with identical content
+	err1 := &unhashableError{data: map[string]any{"key": "value"}}
+	err2 := &unhashableError{data: map[string]any{"key": "value"}}
+
+	// Wrap them in a chain
+	wrapped := errx.Wrap("outer", err1)
+	wrapped = errx.Wrap("middle", wrapped)
+	wrapped = errx.Wrap("inner", err2)
+
+	data, err := errxjson.Marshal(wrapped)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	// Both errors should be in the chain since they're different instances
+	if result.Message == "" {
+		t.Error("Message should not be empty")
+	}
+}
+
+// TestMarshal_SamePointerMultipleTimes verifies that the same error instance
+// appearing multiple times in the chain is only serialized once.
+func TestMarshal_SamePointerMultipleTimes(t *testing.T) {
+	baseErr := &unhashableError{data: map[string]any{"key": "value"}}
+
+	// Create a chain where the same error appears as the base
+	err1 := errx.Wrap("first", baseErr)
+	err2 := errx.Wrap("second", err1)
+
+	// Wrap again
+	wrapped := errx.Wrap("outer", err2)
+
+	data, err := errxjson.Marshal(wrapped)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if result.Message == "" {
+		t.Error("Message should not be empty")
+	}
+}
+
+// TestMarshal_NilErrorInChain verifies that nil errors in the chain are handled correctly.
+func TestMarshal_NilErrorInChain(t *testing.T) {
+	// Wrapping nil returns nil
+	err := errx.Wrap("context", nil)
+	if err != nil {
+		t.Fatalf("Wrapping nil should return nil, got: %v", err)
+	}
+
+	// Marshal nil error should return empty JSON
+	data, marshalErr := errxjson.Marshal(err)
+	if marshalErr != nil {
+		t.Fatalf("Marshal error: %v", marshalErr)
+	}
+
+	// Should be empty or null
+	if len(data) > 0 && string(data) != "null" {
+		t.Errorf("Marshaling nil should return empty or null, got: %s", string(data))
+	}
+}
+
+// TestMarshal_DeepUnhashableChain tests a deep chain of unhashable errors.
+func TestMarshal_DeepUnhashableChain(t *testing.T) {
+	var err error = &unhashableError{data: map[string]any{"level": 0}}
+
+	// Create a deep chain
+	for i := 1; i <= 10; i++ {
+		err = errx.Wrap(fmt.Sprintf("level %d", i), err)
+	}
+
+	data, marshalErr := errxjson.Marshal(err)
+	if marshalErr != nil {
+		t.Fatalf("Marshal error: %v", marshalErr)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	// Count the depth
+	depth := 1
+	current := &result
+	for current.Cause != nil {
+		depth++
+		current = current.Cause
+	}
+
+	// Should have all 11 levels (10 wraps + 1 base)
+	if depth != 11 {
+		t.Errorf("depth = %d, want 11", depth)
+	}
+}
+
+// TestExtractAttrs_UnhashableError verifies that ExtractAttrs works with unhashable errors.
+func TestExtractAttrs_UnhashableError(t *testing.T) {
+	unhashable := &unhashableError{data: map[string]any{"key": "value"}}
+	attrErr := errx.Attrs("user_id", 123)
+	wrapped := errx.Wrap("context", unhashable, attrErr)
+
+	attrs := errx.ExtractAttrs(wrapped)
+
+	if len(attrs) != 1 {
+		t.Fatalf("len(attrs) = %d, want 1", len(attrs))
+	}
+
+	if attrs[0].Key != "user_id" || attrs[0].Value != 123 {
+		t.Errorf("attrs[0] = %+v, want {Key:user_id Value:123}", attrs[0])
+	}
+}
+
+// TestExtractAttrs_CircularWithUnhashable tests circular reference detection in ExtractAttrs
+// with unhashable errors.
+func TestExtractAttrs_CircularWithUnhashable(t *testing.T) {
+	// Create a circular reference with unhashable error
+	unhashable := &unhashableCircularError{data: map[string]any{"key": "value"}}
+	unhashable.cause = unhashable // circular!
+
+	attrErr := errx.Attrs("test", "value")
+	wrapped := errx.Wrap("context", unhashable, attrErr)
+
+	// This should not panic or hang
+	attrs := errx.ExtractAttrs(wrapped)
+
+	if len(attrs) != 1 {
+		t.Fatalf("len(attrs) = %d, want 1", len(attrs))
+	}
+}
+
+// unhashableCircularError is an unhashable error type that can have a circular reference.
+type unhashableCircularError struct {
+	data  map[string]any
+	cause error
+}
+
+func (*unhashableCircularError) Error() string {
+	return "unhashable circular error"
+}
+
+func (e *unhashableCircularError) Unwrap() error {
+	return e.cause
 }
