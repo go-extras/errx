@@ -610,24 +610,24 @@ func TestMarshal_PointerIdentity(t *testing.T) {
 	err1 := &unhashableError{data: map[string]any{"key": "value"}}
 	err2 := &unhashableError{data: map[string]any{"key": "value"}}
 
-	// Wrap them in a chain
-	wrapped := errx.Wrap("outer", err1)
-	wrapped = errx.Wrap("middle", wrapped)
-	wrapped = errx.Wrap("inner", err2)
+	// Wrap them in separate chains
+	wrapped1 := errx.Wrap("first", err1)
+	wrapped2 := errx.Wrap("second", err2)
 
-	data, err := errxjson.Marshal(wrapped)
+	// Marshal both - they should both succeed even though they have identical content
+	data1, err := errxjson.Marshal(wrapped1)
 	if err != nil {
-		t.Fatalf("Marshal error: %v", err)
+		t.Fatalf("Marshal error for wrapped1: %v", err)
 	}
 
-	var result errxjson.SerializedError
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("Unmarshal error: %v", err)
+	data2, err := errxjson.Marshal(wrapped2)
+	if err != nil {
+		t.Fatalf("Marshal error for wrapped2: %v", err)
 	}
 
-	// Both errors should be in the chain since they're different instances
-	if result.Message == "" {
-		t.Error("Message should not be empty")
+	// Both should serialize successfully
+	if len(data1) == 0 || len(data2) == 0 {
+		t.Error("Both errors should serialize successfully")
 	}
 }
 

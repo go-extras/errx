@@ -421,7 +421,9 @@ func extractCarrierClassifications(err error) []errx.Classified {
 		itemVal := clsField.Index(i)
 		// Use unsafe to get interface value from unexported field
 		if itemVal.CanAddr() {
-			ptr := itemVal.UnsafePointer()
+			// UnsafePointer() requires the value to be addressable and not an interface
+			// For interface values, we need to use Addr() first
+			ptr := itemVal.Addr().UnsafePointer()
 			item := *(*errx.Classified)(ptr)
 			result = append(result, item)
 		} else {
@@ -429,7 +431,7 @@ func extractCarrierClassifications(err error) []errx.Classified {
 			newVal := reflect.New(itemVal.Type()).Elem()
 			newVal.Set(itemVal)
 			if newVal.CanAddr() {
-				ptr := newVal.UnsafePointer()
+				ptr := newVal.Addr().UnsafePointer()
 				item := *(*errx.Classified)(ptr)
 				result = append(result, item)
 			}
