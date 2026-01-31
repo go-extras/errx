@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-01-31
+
+This release fixes a critical panic that occurred when marshaling errors containing unhashable types to JSON.
+
+### Fixed
+
+- **Fixed panic on unhashable error types** - Resolved a panic that occurred when marshaling errors with unhashable fields (maps, slices, functions) to JSON. The panic was caused by attempting to use errors as map keys for circular reference detection. The fix uses pointer-based identity tracking with `map[uintptr]bool` instead of `map[error]bool`.
+
+- **Fixed panic on value-based errors** - Resolved a panic that occurred when processing errors with value receivers. The previous implementation used `reflect.ValueOf(err).UnsafePointer()` which only works for pointer types. The fix extracts the data pointer directly from the error interface structure, which works for both pointer-based and value-based errors.
+
+### Changed
+
+- **Simplified circular reference tracking** - Replaced wrapper structs (`visitedErrors` and `visitedErrorsTracker`) with plain `map[uintptr]bool` for circular reference detection, eliminating code duplication and simplifying the implementation.
+
+- **Extracted pointer extraction logic** - Created `internal/errptr` package with comprehensive tests to provide a shared utility for extracting pointer identities from error interfaces, eliminating duplication between `json/json.go` and `attributed.go`.
+
+### Technical Details
+
+The key improvements include:
+
+1. **Pointer-based identity tracking** - Using `map[uintptr]bool` instead of `map[error]bool` to avoid panics on unhashable error types (e.g., `validation.Errors` from go-ozzo/ozzo-validation).
+
+2. **Safe pointer extraction** - Extracting the data pointer directly from the error interface structure using `unsafe.Pointer`, which works for both pointer-based and value-based errors.
+
+3. **uintptr safety** - The use of `uintptr` as a map key is safe for this use case because the value is only used for identity comparison during a single operation, we never dereference the pointer, and the actual error values are kept alive by the call stack during traversal.
+
 ## [1.2.0] - 2026-01-31
 
 This release adds a new convenience function `ClassifyNew` for creating and classifying errors in a single step.
@@ -130,6 +156,7 @@ This release provides a complete, production-ready error handling solution with 
 - **Issue templates** - Bug reports, feature requests, and questions
 - **Pull request template** - Standardized PR process
 
+[1.2.1]: https://github.com/go-extras/errx/releases/tag/v1.2.1
 [1.2.0]: https://github.com/go-extras/errx/releases/tag/v1.2.0
 [1.1.0]: https://github.com/go-extras/errx/releases/tag/v1.1.0
 [1.0.0]: https://github.com/go-extras/errx/releases/tag/v1.0.0

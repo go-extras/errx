@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/go-extras/errx/internal/errptr"
 )
 
 // Attr represents a key-value pair for structured error context.
@@ -258,7 +260,7 @@ func ExtractAttrs(err error) AttrList {
 	}
 
 	var allAttrs []Attr
-	visited := make(map[error]bool)
+	visited := make(map[uintptr]bool)
 	attributedErrorsFound := make(map[*attributed]bool)
 
 	// Use a queue for breadth-first traversal to handle multi-errors
@@ -269,10 +271,13 @@ func ExtractAttrs(err error) AttrList {
 		queue = queue[1:]
 
 		// Skip if already visited (avoid cycles)
-		if visited[current] {
-			continue
+		if current != nil {
+			ptr := errptr.Get(current)
+			if visited[ptr] {
+				continue
+			}
+			visited[ptr] = true
 		}
-		visited[current] = true
 
 		// Check if current error is an attributed error directly
 		if aErr, ok := current.(*attributed); ok {
