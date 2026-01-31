@@ -20,11 +20,11 @@ func (a Attr) String() string {
 	return fmt.Sprintf("%s=%+v", a.Key, a.Value)
 }
 
-// Attrs is a slice of Attr structs.
-type Attrs []Attr
+// AttrList is a slice of Attr structs.
+type AttrList []Attr
 
-// String returns a string representation of the Attrs slice.
-func (al Attrs) String() string {
+// String returns a string representation of the AttrList slice.
+func (al AttrList) String() string {
 	parts := make([]string, 0, len(al))
 	for _, attr := range al {
 		parts = append(parts, attr.String())
@@ -32,7 +32,7 @@ func (al Attrs) String() string {
 	return strings.Join(parts, " ")
 }
 
-// ToSlogAttrs converts errx.Attrs to []slog.Attr for use with slog.Logger.LogAttrs.
+// ToSlogAttrs converts errx.AttrList to []slog.Attr for use with slog.Logger.LogAttrs.
 // This is a highly efficient way to log attributes with slog, minimizing allocations
 // compared to alternative approaches while preserving type safety.
 //
@@ -40,11 +40,11 @@ func (al Attrs) String() string {
 //
 // Example:
 //
-//	err := errx.WithAttrs("user_id", 123, "action", "delete")
+//	err := errx.Attrs("user_id", 123, "action", "delete")
 //	attrs := errx.ExtractAttrs(err)
 //	slogAttrs := attrs.ToSlogAttrs()
 //	logger.LogAttrs(context.Background(), slog.LevelError, "operation failed", slogAttrs...)
-func (al Attrs) ToSlogAttrs() []slog.Attr {
+func (al AttrList) ToSlogAttrs() []slog.Attr {
 	if len(al) == 0 {
 		return nil
 	}
@@ -56,7 +56,7 @@ func (al Attrs) ToSlogAttrs() []slog.Attr {
 	return result
 }
 
-// ToSlogArgs converts errx.Attrs to []any for use with slog convenience methods.
+// ToSlogArgs converts errx.AttrList to []any for use with slog convenience methods.
 // This enables using attributes with slog.Error, slog.Info, slog.Warn, and similar methods
 // that accept variadic ...any arguments (such as key-value pairs or slog.Attr values).
 //
@@ -65,11 +65,11 @@ func (al Attrs) ToSlogAttrs() []slog.Attr {
 //
 // Example:
 //
-//	err := errx.WithAttrs("user_id", 123, "action", "delete")
+//	err := errx.Attrs("user_id", 123, "action", "delete")
 //	attrs := errx.ExtractAttrs(err)
 //	slogArgs := attrs.ToSlogArgs()
 //	slog.Error("operation failed", slogArgs...)
-func (al Attrs) ToSlogArgs() []any {
+func (al AttrList) ToSlogArgs() []any {
 	if len(al) == 0 {
 		return nil
 	}
@@ -81,8 +81,62 @@ func (al Attrs) ToSlogArgs() []any {
 	return result
 }
 
+// Attrs creates an error with structured attributes for additional context.
+// Attributes can be extracted later using ExtractAttrs.
+//
+// # Recommended Usage
+//
+// Attrs is typically used in combination with Wrap or Classify to create rich errors
+// with both meaningful error messages and structured metadata:
+//
+//	// RECOMMENDED: Combine with Wrap for context + attributes
+//	attrErr := errx.Attrs("user_id", 123, "action", "delete")
+//	return errx.Wrap("failed to delete user", baseErr, attrErr)
+//
+//	// RECOMMENDED: Combine with Classify for classification + attributes
+//	attrErr := errx.Attrs("retry_count", 3)
+//	return errx.Classify(baseErr, ErrRetryable, attrErr)
+//
+// Using Attrs alone produces a less informative error message that only shows
+// the attribute list. For better error messages, always combine it with Wrap or Classify.
+//
+// # Input Formats
+//
+// Attrs accepts multiple input formats:
+//   - Key-value pairs: Attrs("key1", value1, "key2", value2)
+//   - Attr structs: Attrs(Attr{Key: "key1", Value: value1}, Attr{Key: "key2", Value: value2})
+//   - Attr slices: Attrs([]Attr{{Key: "key1", Value: value1}, {Key: "key2", Value: value2}})
+//   - Mixed formats: Attrs("key1", value1, Attr{Key: "key2", Value: value2})
+//
+// The arguments are processed following a structured pattern (similar to slog):
+//   - If an argument is an Attr, it is used as is.
+//   - If an argument is an []Attr or AttrList, all attributes are appended.
+//   - If an argument is a string and this is not the last argument,
+//     the following argument is treated as the value and the two are combined into an Attr.
+//   - Otherwise, the argument is treated as a value with key "!BADKEY".
+//
+// The "!BADKEY" key is used for malformed arguments to help identify issues during debugging.
+// This behavior matches the slog package's handling of malformed key-value pairs.
+//
+// Examples:
+//
+//	Attrs("key", "value")                    // Normal key-value pair
+//	Attrs("key")                             // Odd number: Attr{Key: "!BADKEY", Value: "key"}
+//	Attrs(123)                               // Non-string: Attr{Key: "!BADKEY", Value: 123}
+//	Attrs("key", 123)                        // String key with int value: Attr{Key: "key", Value: 123}
+//	Attrs(Attr{Key: "k", Value: "v"})        // Direct Attr usage
+//	Attrs([]Attr{{Key: "k", Value: "v"}})    // Slice of Attrs
+func Attrs(attrs ...any) Classified {
+	parsedAttrs := parseAttrs(attrs)
+	return &attributed{
+		attrs: parsedAttrs,
+	}
+}
+
 // WithAttrs creates an error with structured attributes for additional context.
 // Attributes can be extracted later using ExtractAttrs.
+//
+// Deprecated: Use Attrs instead.
 //
 // # Recommended Usage
 //
@@ -110,7 +164,7 @@ func (al Attrs) ToSlogArgs() []any {
 //
 // The arguments are processed following a structured pattern (similar to slog):
 //   - If an argument is an Attr, it is used as is.
-//   - If an argument is an []Attr or Attrs, all attributes are appended.
+//   - If an argument is an []Attr or AttrList, all attributes are appended.
 //   - If an argument is a string and this is not the last argument,
 //     the following argument is treated as the value and the two are combined into an Attr.
 //   - Otherwise, the argument is treated as a value with key "!BADKEY".
@@ -136,7 +190,7 @@ func WithAttrs(attrs ...any) Classified {
 // parseAttrs converts various input formats into a slice of Attr.
 // The arguments are processed as follows:
 //   - If an argument is an Attr, it is used as is.
-//   - If an argument is an []Attr, all attributes are appended.
+//   - If an argument is an []Attr or AttrList, all attributes are appended.
 //   - If an argument is a string and this is not the last argument,
 //     the following argument is treated as the value and the two are combined
 //     into an Attr.
@@ -156,8 +210,8 @@ func parseAttrs(attrs []any) []Attr {
 		case []Attr:
 			// Slice of Attr structs - all appended
 			result = append(result, v...)
-		case Attrs:
-			// Slice of Attr structs - all appended
+		case AttrList:
+			// AttrList (slice of Attr structs) - all appended
 			result = append(result, v...)
 		case string:
 			// String key: if there's a next argument, treat it as value
@@ -211,7 +265,7 @@ func (ae *attributed) Error() string {
 		return "(empty attribute list)"
 	}
 
-	return Attrs(ae.attrs).String()
+	return AttrList(ae.attrs).String()
 }
 
 // Attrs returns the structured attributes associated with this error.
@@ -245,7 +299,7 @@ func HasAttrs(err error) bool {
 // consider converting the result to a map with your own collision-handling rules.
 //
 // Returns nil if the error is nil or does not contain any attributes.
-func ExtractAttrs(err error) Attrs {
+func ExtractAttrs(err error) AttrList {
 	if err == nil {
 		return nil
 	}

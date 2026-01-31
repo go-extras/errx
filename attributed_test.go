@@ -476,10 +476,10 @@ func TestWithAttrs_StringFollowedByNonString(t *testing.T) {
 	}
 }
 
-// TestWithAttrs_AttrsTypeAlias tests using Attrs type alias
+// TestWithAttrs_AttrsTypeAlias tests using AttrList type alias
 func TestWithAttrs_AttrsTypeAlias(t *testing.T) {
-	// Attrs is an alias for []Attr and should work the same
-	attrsList := errx.Attrs{
+	// AttrList is an alias for []Attr and should work the same
+	attrsList := errx.AttrList{
 		{Key: "key1", Value: "value1"},
 		{Key: "key2", Value: "value2"},
 	}
@@ -619,12 +619,12 @@ func TestHasAttrs_WithMultiError(t *testing.T) {
 func TestAttrs_ToSlogAttrs(t *testing.T) {
 	tests := []struct {
 		name     string
-		attrs    errx.Attrs
+		attrs    errx.AttrList
 		expected []slog.Attr
 	}{
 		{
 			name: "basic conversion",
-			attrs: errx.Attrs{
+			attrs: errx.AttrList{
 				{Key: "user_id", Value: 123},
 				{Key: "action", Value: "delete"},
 			},
@@ -635,7 +635,7 @@ func TestAttrs_ToSlogAttrs(t *testing.T) {
 		},
 		{
 			name: "mixed types",
-			attrs: errx.Attrs{
+			attrs: errx.AttrList{
 				{Key: "string", Value: "test"},
 				{Key: "int", Value: 42},
 				{Key: "bool", Value: true},
@@ -650,7 +650,7 @@ func TestAttrs_ToSlogAttrs(t *testing.T) {
 		},
 		{
 			name:     "empty attrs",
-			attrs:    errx.Attrs{},
+			attrs:    errx.AttrList{},
 			expected: nil,
 		},
 		{
@@ -712,12 +712,12 @@ func TestAttrs_ToSlogAttrs_Integration(t *testing.T) {
 func TestAttrs_ToSlogArgs(t *testing.T) {
 	tests := []struct {
 		name     string
-		attrs    errx.Attrs
+		attrs    errx.AttrList
 		expected []any
 	}{
 		{
 			name: "basic conversion",
-			attrs: errx.Attrs{
+			attrs: errx.AttrList{
 				{Key: "user_id", Value: 123},
 				{Key: "action", Value: "delete"},
 			},
@@ -728,7 +728,7 @@ func TestAttrs_ToSlogArgs(t *testing.T) {
 		},
 		{
 			name: "mixed types",
-			attrs: errx.Attrs{
+			attrs: errx.AttrList{
 				{Key: "string", Value: "test"},
 				{Key: "int", Value: 42},
 				{Key: "bool", Value: true},
@@ -743,7 +743,7 @@ func TestAttrs_ToSlogArgs(t *testing.T) {
 		},
 		{
 			name:     "empty attrs",
-			attrs:    errx.Attrs{},
+			attrs:    errx.AttrList{},
 			expected: nil,
 		},
 		{

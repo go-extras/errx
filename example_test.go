@@ -142,9 +142,9 @@ func ExampleDisplayTextDefault() {
 	// Nil error: ""
 }
 
-// ExampleWithAttrs demonstrates adding structured attributes to errors
-func ExampleWithAttrs() {
-	attrErr := errx.WithAttrs(
+// ExampleAttrs demonstrates adding structured attributes to errors
+func ExampleAttrs() {
+	attrErr := errx.Attrs(
 		"user_id", 12345,
 		"action", "delete",
 		"resource", "account",
@@ -166,7 +166,7 @@ func Example_combinedUsage() {
 
 	// Create error with attributes
 	baseErr := errors.New("record not found in database")
-	attrErr := errx.WithAttrs("table", "users", "id", 123)
+	attrErr := errx.Attrs("table", "users", "id", 123)
 
 	// Classify the error
 	classifiedErr := errx.Classify(baseErr, attrErr, ErrNotFound)
@@ -206,7 +206,7 @@ func ExampleIsDisplayable() {
 
 // ExampleHasAttrs demonstrates checking if an error has attributes
 func ExampleHasAttrs() {
-	attrErr := errx.WithAttrs("key", "value")
+	attrErr := errx.Attrs("key", "value")
 	regularErr := errors.New("no attributes")
 
 	fmt.Println("Attr error has attrs:", errx.HasAttrs(attrErr))
@@ -227,7 +227,7 @@ func Example_apiHandler() {
 	var serviceErr error
 	serviceErr = errx.NewDisplayable("Email is required")
 	serviceErr = errx.Classify(serviceErr, ErrValidation)
-	serviceErr = errx.Classify(serviceErr, errx.WithAttrs("field", "email"))
+	serviceErr = errx.Classify(serviceErr, errx.Attrs("field", "email"))
 
 	// API handler logic
 	statusCode := 500
@@ -278,7 +278,7 @@ func ExampleFromAttrMap() {
 func ExampleExtractAttrs() {
 	// Create error with attributes
 	baseErr := errors.New("database connection failed")
-	attrErr := errx.WithAttrs("host", "localhost", "port", 5432)
+	attrErr := errx.Attrs("host", "localhost", "port", 5432)
 	classified := errx.Classify(baseErr, attrErr)
 
 	// Wrap it further
@@ -311,7 +311,7 @@ func Example_richError() {
 	displayErr := errx.NewDisplayable("The service is temporarily unavailable")
 
 	// Add structured context
-	attrErr := errx.WithAttrs(
+	attrErr := errx.Attrs(
 		"database", "users",
 		"operation", "read",
 		"timeout_seconds", 30,
@@ -413,10 +413,10 @@ func Example_apiHandlerWithDefault() {
 	// internal error: An unexpected error occurred
 }
 
-// ExampleAttrs_ToSlogAttrs demonstrates converting errx.Attrs to slog.Attr for use with LogAttrs
-func ExampleAttrs_ToSlogAttrs() {
+// ExampleAttrList_ToSlogAttrs demonstrates converting errx.AttrList to slog.Attr for use with LogAttrs
+func ExampleAttrList_ToSlogAttrs() {
 	// Create an error with attributes
-	err := errx.WithAttrs("user_id", 123, "action", "delete", "resource", "account")
+	err := errx.Attrs("user_id", 123, "action", "delete", "resource", "account")
 	wrappedErr := errx.Wrap("operation failed", err)
 
 	// Extract attributes from the error
@@ -443,10 +443,10 @@ func ExampleAttrs_ToSlogAttrs() {
 	// level=ERROR msg="operation failed" user_id=123 action=delete resource=account
 }
 
-// ExampleAttrs_ToSlogArgs demonstrates converting errx.Attrs to []any for use with slog convenience methods
-func ExampleAttrs_ToSlogArgs() {
+// ExampleAttrList_ToSlogArgs demonstrates converting errx.AttrList to []any for use with slog convenience methods
+func ExampleAttrList_ToSlogArgs() {
 	// Create an error with attributes
-	err := errx.WithAttrs("user_id", 123, "action", "delete", "resource", "account")
+	err := errx.Attrs("user_id", 123, "action", "delete", "resource", "account")
 	wrappedErr := errx.Wrap("operation failed", err)
 
 	// Extract attributes from the error
