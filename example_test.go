@@ -58,6 +58,47 @@ func ExampleClassify() {
 	// Is validation error: true
 }
 
+// ExampleClassifyNew demonstrates creating and classifying an error in one step
+func ExampleClassifyNew() {
+	ErrDatabase := errx.NewSentinel("database error")
+	ErrRetryable := errx.NewSentinel("retryable error")
+
+	// Create a new error and classify it in one step
+	err := errx.ClassifyNew("connection timeout", ErrDatabase, ErrRetryable)
+
+	fmt.Println(err.Error())
+	fmt.Println("Is database error:", errors.Is(err, ErrDatabase))
+	fmt.Println("Is retryable:", errors.Is(err, ErrRetryable))
+
+	// Output:
+	// connection timeout
+	// Is database error: true
+	// Is retryable: true
+}
+
+// ExampleClassifyNew_withDisplayable demonstrates ClassifyNew with displayable errors
+func ExampleClassifyNew_withDisplayable() {
+	ErrNotFound := errx.NewSentinel("not found")
+	displayErr := errx.NewDisplayable("The requested resource was not found")
+
+	// Create error with both classification and displayable message
+	err := errx.ClassifyNew("user record missing from database", ErrNotFound, displayErr)
+
+	// Full error for logging
+	fmt.Println("Full error:", err.Error())
+
+	// User-facing message
+	fmt.Println("Display text:", errx.DisplayText(err))
+
+	// Classification check
+	fmt.Println("Is not found:", errors.Is(err, ErrNotFound))
+
+	// Output:
+	// Full error: user record missing from database
+	// Display text: The requested resource was not found
+	// Is not found: true
+}
+
 // ExampleNewSentinel_multipleParents demonstrates creating a sentinel with multiple parent sentinels
 func ExampleNewSentinel_multipleParents() {
 	// Create independent classification dimensions

@@ -276,6 +276,99 @@ func TestClassifyPreservesErrorMessage(t *testing.T) {
 	}
 }
 
+// TestClassifyNew tests the ClassifyNew function
+func TestClassifyNew(t *testing.T) {
+	tag := errx.NewSentinel("tag error")
+	err := errx.ClassifyNew("test error message", tag)
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if err.Error() != "test error message" {
+		t.Errorf("expected 'test error message', got %q", err.Error())
+	}
+	if !errors.Is(err, tag) {
+		t.Error("expected error to match tag")
+	}
+}
+
+// TestClassifyNewMultipleTags tests ClassifyNew with multiple tags
+func TestClassifyNewMultipleTags(t *testing.T) {
+	tag1 := errx.NewSentinel("tag1")
+	tag2 := errx.NewSentinel("tag2")
+	err := errx.ClassifyNew("test error", tag1, tag2)
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if err.Error() != "test error" {
+		t.Errorf("expected 'test error', got %q", err.Error())
+	}
+	if !errors.Is(err, tag1) {
+		t.Error("expected error to match tag1")
+	}
+	if !errors.Is(err, tag2) {
+		t.Error("expected error to match tag2")
+	}
+}
+
+// TestClassifyNewWithDisplayable tests ClassifyNew with displayable error
+func TestClassifyNewWithDisplayable(t *testing.T) {
+	tag := errx.NewSentinel("tag error")
+	displayable := errx.NewDisplayable("user-facing message")
+	err := errx.ClassifyNew("internal error", tag, displayable)
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if err.Error() != "internal error" {
+		t.Errorf("expected 'internal error', got %q", err.Error())
+	}
+	if !errors.Is(err, tag) {
+		t.Error("expected error to match tag")
+	}
+	if !errx.IsDisplayable(err) {
+		t.Error("expected error to be displayable")
+	}
+	if errx.DisplayText(err) != "user-facing message" {
+		t.Errorf("expected displayable text 'user-facing message', got %q", errx.DisplayText(err))
+	}
+}
+
+// TestClassifyNewWithAttributes tests ClassifyNew with attributes
+func TestClassifyNewWithAttributes(t *testing.T) {
+	tag := errx.NewSentinel("tag error")
+	attrErr := errx.Attrs("key1", "value1", "key2", 42)
+	err := errx.ClassifyNew("error with attrs", tag, attrErr)
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if !errors.Is(err, tag) {
+		t.Error("expected error to match tag")
+	}
+	if !errx.HasAttrs(err) {
+		t.Error("expected error to have attributes")
+	}
+
+	attrs := errx.ExtractAttrs(err)
+	if len(attrs) != 2 {
+		t.Errorf("expected 2 attributes, got %d", len(attrs))
+	}
+}
+
+// TestClassifyNewNoClassifications tests ClassifyNew without classifications
+func TestClassifyNewNoClassifications(t *testing.T) {
+	err := errx.ClassifyNew("simple error")
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if err.Error() != "simple error" {
+		t.Errorf("expected 'simple error', got %q", err.Error())
+	}
+}
+
 // TestClassifyToWrappedError tests classifying a wrapped error
 func TestClassifyToWrappedError(t *testing.T) {
 	tag1 := errx.NewSentinel("tag1")

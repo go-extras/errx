@@ -267,3 +267,138 @@ func TestComplexErrorChain(t *testing.T) {
 		t.Error("Expected stack trace")
 	}
 }
+
+// TestClassifyNew verifies that stacktrace.ClassifyNew creates and classifies errors with traces
+func TestClassifyNew(t *testing.T) {
+	var ErrDatabase = errx.NewSentinel("database error")
+	err := stacktrace.ClassifyNew("connection timeout", ErrDatabase)
+
+	// Verify error message
+	if err.Error() != "connection timeout" {
+		t.Errorf("Expected 'connection timeout', got %q", err.Error())
+	}
+
+	// Verify classification
+	if !errors.Is(err, ErrDatabase) {
+		t.Error("Expected error to match ErrDatabase sentinel")
+	}
+
+	// Verify stack trace was captured
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Fatal("Expected stack trace from ClassifyNew, got nil")
+	}
+
+	// Verify the trace contains this test function
+	found := false
+	for _, frame := range frames {
+		if strings.Contains(frame.Function, "TestClassifyNew") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected stack trace to contain TestClassifyNew function")
+	}
+}
+
+// TestClassifyNewMultipleClassifications verifies ClassifyNew with multiple classifications
+func TestClassifyNewMultipleClassifications(t *testing.T) {
+	var (
+		ErrDatabase  = errx.NewSentinel("database error")
+		ErrRetryable = errx.NewSentinel("retryable error")
+	)
+
+	err := stacktrace.ClassifyNew("temporary failure", ErrDatabase, ErrRetryable)
+
+	// Verify both classifications
+	if !errors.Is(err, ErrDatabase) {
+		t.Error("Expected error to match ErrDatabase")
+	}
+	if !errors.Is(err, ErrRetryable) {
+		t.Error("Expected error to match ErrRetryable")
+	}
+
+	// Verify stack trace
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Error("Expected stack trace")
+	}
+}
+
+// TestClassifyNewWithDisplayable verifies ClassifyNew with displayable errors
+func TestClassifyNewWithDisplayable(t *testing.T) {
+	var ErrNotFound = errx.NewSentinel("not found")
+	displayErr := errx.NewDisplayable("Resource not found")
+
+	err := stacktrace.ClassifyNew("user record missing", ErrNotFound, displayErr)
+
+	// Verify error message
+	if err.Error() != "user record missing" {
+		t.Errorf("Expected 'user record missing', got %q", err.Error())
+	}
+
+	// Verify classification
+	if !errors.Is(err, ErrNotFound) {
+		t.Error("Expected error to match ErrNotFound")
+	}
+
+	// Verify displayable
+	if !errx.IsDisplayable(err) {
+		t.Error("Expected error to be displayable")
+	}
+	if errx.DisplayText(err) != "Resource not found" {
+		t.Errorf("Expected displayable text 'Resource not found', got %q", errx.DisplayText(err))
+	}
+
+	// Verify stack trace
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Error("Expected stack trace")
+	}
+}
+
+// TestClassifyNewWithAttributes verifies ClassifyNew with attributes
+func TestClassifyNewWithAttributes(t *testing.T) {
+	var ErrDatabase = errx.NewSentinel("database error")
+	attrErr := errx.Attrs("query", "SELECT * FROM users", "timeout_ms", 5000)
+
+	err := stacktrace.ClassifyNew("query timeout", ErrDatabase, attrErr)
+
+	// Verify classification
+	if !errors.Is(err, ErrDatabase) {
+		t.Error("Expected error to match ErrDatabase")
+	}
+
+	// Verify attributes
+	if !errx.HasAttrs(err) {
+		t.Error("Expected error to have attributes")
+	}
+
+	attrs := errx.ExtractAttrs(err)
+	if len(attrs) != 2 {
+		t.Errorf("Expected 2 attributes, got %d", len(attrs))
+	}
+
+	// Verify stack trace
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Error("Expected stack trace")
+	}
+}
+
+// TestClassifyNewNoClassifications verifies ClassifyNew without classifications
+func TestClassifyNewNoClassifications(t *testing.T) {
+	err := stacktrace.ClassifyNew("simple error")
+
+	// Verify error message
+	if err.Error() != "simple error" {
+		t.Errorf("Expected 'simple error', got %q", err.Error())
+	}
+
+	// Verify stack trace is still captured
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Error("Expected stack trace even without classifications")
+	}
+}

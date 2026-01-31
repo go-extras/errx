@@ -195,3 +195,40 @@ func Classify(cause error, classifications ...error) error {
 
 	return errx.Classify(cause, classified...)
 }
+
+// ClassifyNew creates a new error with the given text and immediately classifies it
+// with one or more classifications. This is a convenience function equivalent to
+// calling compat.Classify(errors.New(text), classifications...).
+//
+// This function accepts standard Go error interface for classifications instead of
+// requiring errx.Classified types, making it compatible with any error type including
+// third-party errors and standard library errors.
+//
+// This function is useful when you want to create a new error and classify it in a
+// single step, reducing verbosity compared to the two-step approach.
+//
+// Example:
+//
+//	var ErrNotFound = errors.New("not found")
+//	var ErrDatabase = errors.New("database error")
+//
+//	// Instead of:
+//	// err := compat.Classify(errors.New("user record missing"), ErrNotFound, ErrDatabase)
+//
+//	// You can write:
+//	err := compat.ClassifyNew("user record missing", ErrNotFound, ErrDatabase)
+//
+//	fmt.Println(err.Error())                        // Output: user record missing
+//	fmt.Println(errors.Is(err, ErrNotFound))        // Output: true
+//	fmt.Println(errors.Is(err, ErrDatabase))        // Output: true
+func ClassifyNew(text string, classifications ...error) error {
+	// Convert error classifications to Classified
+	classified := make([]errx.Classified, 0, len(classifications))
+	for _, cls := range classifications {
+		if c := toClassified(cls); c != nil {
+			classified = append(classified, c)
+		}
+	}
+
+	return errx.ClassifyNew(text, classified...)
+}

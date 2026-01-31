@@ -309,3 +309,99 @@ func TestWrap_NilClassifications(t *testing.T) {
 		t.Error("expected error to be classified as ErrNotFound")
 	}
 }
+
+func TestClassifyNew_SingleClassification(t *testing.T) {
+	err := compat.ClassifyNew("test error message", ErrNotFound)
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+
+	expected := "test error message"
+	if err.Error() != expected {
+		t.Errorf("expected %q, got %q", expected, err.Error())
+	}
+
+	if !errors.Is(err, ErrNotFound) {
+		t.Error("expected error to be classified as ErrNotFound")
+	}
+}
+
+func TestClassifyNew_MultipleClassifications(t *testing.T) {
+	err := compat.ClassifyNew("test error", ErrNotFound, ErrDatabase)
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+
+	if !errors.Is(err, ErrNotFound) {
+		t.Error("expected error to be classified as ErrNotFound")
+	}
+	if !errors.Is(err, ErrDatabase) {
+		t.Error("expected error to be classified as ErrDatabase")
+	}
+}
+
+func TestClassifyNew_WithErrxTypes(t *testing.T) {
+	sentinel := errx.NewSentinel("sentinel")
+	displayable := errx.NewDisplayable("user message")
+	attrErr := errx.Attrs("key", "value")
+
+	err := compat.ClassifyNew("internal error", sentinel, displayable, attrErr, ErrValidation)
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+
+	// Check error message
+	if err.Error() != "internal error" {
+		t.Errorf("expected 'internal error', got %q", err.Error())
+	}
+
+	// Check all classifications
+	if !errors.Is(err, sentinel) {
+		t.Error("expected error to be classified as sentinel")
+	}
+	if !errors.Is(err, ErrValidation) {
+		t.Error("expected error to be classified as ErrValidation")
+	}
+
+	// Check displayable
+	if !errx.IsDisplayable(err) {
+		t.Error("expected error to be displayable")
+	}
+	if errx.DisplayText(err) != "user message" {
+		t.Errorf("expected displayable text 'user message', got %q", errx.DisplayText(err))
+	}
+
+	// Check attributes
+	if !errx.HasAttrs(err) {
+		t.Error("expected error to have attributes")
+	}
+}
+
+func TestClassifyNew_NoClassifications(t *testing.T) {
+	err := compat.ClassifyNew("simple error")
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+
+	expected := "simple error"
+	if err.Error() != expected {
+		t.Errorf("expected %q, got %q", expected, err.Error())
+	}
+}
+
+func TestClassifyNew_WithNilClassifications(t *testing.T) {
+	err := compat.ClassifyNew("test error", nil, ErrNotFound, nil)
+
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+
+	// Should still work with non-nil classification
+	if !errors.Is(err, ErrNotFound) {
+		t.Error("expected error to be classified as ErrNotFound")
+	}
+}

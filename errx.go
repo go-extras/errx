@@ -259,6 +259,31 @@ func Classify(cause error, classifications ...Classified) error {
 	return classify(cause, classifications...)
 }
 
+// ClassifyNew creates a new error with the given text and immediately classifies it
+// with one or more classification sentinels. This is a convenience function equivalent
+// to calling errx.Classify(errors.New(text), classifications...).
+//
+// This function is useful when you want to create a new error and classify it in a
+// single step, reducing verbosity compared to the two-step approach.
+//
+// Example:
+//
+//	var ErrNotFound = errx.NewSentinel("resource not found")
+//	var ErrDatabase = errx.NewSentinel("database error")
+//
+//	// Instead of:
+//	// err := errx.Classify(errors.New("user record missing"), ErrNotFound, ErrDatabase)
+//
+//	// You can write:
+//	err := errx.ClassifyNew("user record missing", ErrNotFound, ErrDatabase)
+//
+//	fmt.Println(err.Error())                        // Output: user record missing
+//	fmt.Println(errors.Is(err, ErrNotFound))        // Output: true
+//	fmt.Println(errors.Is(err, ErrDatabase))        // Output: true
+func ClassifyNew(text string, classifications ...Classified) error {
+	return classify(simpleError(text), classifications...)
+}
+
 func classify(cause error, classifications ...Classified) error {
 	if cause == nil {
 		return nil
@@ -306,4 +331,12 @@ func (c *carrier) As(target any) bool {
 	}
 
 	return false
+}
+
+// simpleError is a simple error type that just holds a text message.
+// It's used internally by ClassifyNew to create a basic error.
+type simpleError string
+
+func (e simpleError) Error() string {
+	return string(e)
 }

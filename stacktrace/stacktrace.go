@@ -175,3 +175,34 @@ func Classify(cause error, classifications ...errx.Classified) error {
 	classifications = append(classifications, trace)
 	return errx.Classify(cause, classifications...)
 }
+
+// ClassifyNew creates a new error with the given text and immediately classifies it
+// with one or more classifications, automatically capturing a stack trace at the call site.
+//
+// This is a convenience function equivalent to:
+//
+//	errx.ClassifyNew(text, append(classifications, stacktrace.Here())...)
+//
+// This function is useful when you want to create a new error, classify it, and
+// capture a stack trace in a single step, reducing verbosity.
+//
+// Example:
+//
+//	var ErrNotFound = errx.NewSentinel("not found")
+//	var ErrDatabase = errx.NewSentinel("database error")
+//
+//	// Instead of:
+//	// err := stacktrace.Classify(errors.New("user record missing"), ErrNotFound, ErrDatabase)
+//
+//	// You can write:
+//	err := stacktrace.ClassifyNew("user record missing", ErrNotFound, ErrDatabase)
+//
+//	fmt.Println(err.Error())                        // Output: user record missing
+//	fmt.Println(errors.Is(err, ErrNotFound))        // Output: true
+//	fmt.Println(stacktrace.Extract(err) != nil)     // Output: true
+func ClassifyNew(text string, classifications ...errx.Classified) error {
+	// Capture stack with skip=2 to skip ClassifyNew() and runtime.Callers
+	trace := captureStack(2)
+	classifications = append(classifications, trace)
+	return errx.ClassifyNew(text, classifications...)
+}
