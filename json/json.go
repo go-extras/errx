@@ -24,9 +24,9 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"unsafe"
 
 	"github.com/go-extras/errx"
+	"github.com/go-extras/errx/internal/errptr"
 	"github.com/go-extras/errx/stacktrace"
 )
 
@@ -106,11 +106,7 @@ func (v *visitedErrors) contains(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Get the pointer to the data stored in the error interface.
-	// This works for all error types (both pointer and value types) and
-	// for errors with unhashable fields.
-	// We extract the data pointer from the interface structure directly.
-	ptr := getErrorPointer(err)
+	ptr := errptr.Get(err)
 	return v.visited[ptr]
 }
 
@@ -119,24 +115,8 @@ func (v *visitedErrors) add(err error) {
 	if err == nil {
 		return
 	}
-	ptr := getErrorPointer(err)
+	ptr := errptr.Get(err)
 	v.visited[ptr] = true
-}
-
-// getErrorPointer extracts the data pointer from an error interface.
-// This works for both pointer-based and value-based errors.
-// For pointer errors, it returns the pointer to the object.
-// For value errors, it returns the pointer to the copy stored in the interface.
-func getErrorPointer(err error) uintptr {
-	// An interface in Go is represented as two pointers:
-	// - type pointer (points to type information)
-	// - data pointer (points to the actual data)
-	// We extract the data pointer which uniquely identifies the error instance.
-	type iface struct {
-		typ  unsafe.Pointer
-		data unsafe.Pointer
-	}
-	return uintptr((*iface)(unsafe.Pointer(&err)).data)
 }
 
 // Marshal serializes an error to JSON bytes.
