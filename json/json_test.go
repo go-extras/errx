@@ -786,3 +786,45 @@ func (*unhashableCircularError) Error() string {
 func (e *unhashableCircularError) Unwrap() error {
 	return e.cause
 }
+
+// valueBasedError is an error with a value receiver (not a pointer).
+// This tests that our pointer extraction works for value-based errors.
+type valueBasedError struct {
+	msg string
+}
+
+func (e valueBasedError) Error() string {
+	return e.msg
+}
+
+func TestMarshal_ValueBasedError(t *testing.T) {
+	// Create a value-based error (not a pointer)
+	err := valueBasedError{msg: "value error"}
+
+	// Wrap it
+	wrapped := stacktrace.Wrap("outer", err)
+
+	// Marshal should work without panic
+	data, marshalErr := errxjson.Marshal(wrapped)
+	if marshalErr != nil {
+		t.Fatalf("Marshal error: %v", marshalErr)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	// Verify the error was serialized
+	if result.Message != "outer: value error" {
+		t.Errorf("Expected 'outer: value error', got: %s", result.Message)
+	}
+
+	if result.Cause == nil {
+		t.Fatal("Cause should not be nil")
+	}
+
+	if result.Cause.Message != "value error" {
+		t.Errorf("Expected 'value error', got: %s", result.Cause.Message)
+	}
+}
