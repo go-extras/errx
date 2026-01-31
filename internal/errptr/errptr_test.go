@@ -88,20 +88,21 @@ func TestGet_ValueError_SameVariable(t *testing.T) {
 }
 
 func TestGet_ValueError_DifferentValues(t *testing.T) {
-	// Create value errors with different content to ensure they're not optimized to same location
+	// Create value errors with different content
 	var e1 error = valueError{msg: "test1"}
 	var e2 error = valueError{msg: "test2"}
 
 	ptr1 := errptr.Get(e1)
 	ptr2 := errptr.Get(e2)
 
-	// Note: The compiler may optimize identical value errors to the same location,
-	// but errors with different content should have different pointers
 	if ptr1 == 0 || ptr2 == 0 {
 		t.Error("Pointers should not be 0 for non-nil errors")
 	}
-	// We don't assert ptr1 != ptr2 because the compiler may optimize,
-	// but in practice they will be different for different values
+
+	// Different values should have different pointers
+	if ptr1 == ptr2 {
+		t.Errorf("Different value errors should have different pointers, got ptr1=%v ptr2=%v", ptr1, ptr2)
+	}
 }
 
 func TestGet_UnhashableError(t *testing.T) {
