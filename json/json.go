@@ -85,40 +85,6 @@ func defaultConfig() *config {
 	}
 }
 
-// visitedErrors tracks visited errors during serialization to detect circular references.
-// It uses pointer identity rather than value equality, which works for all error types
-// including those with unhashable fields.
-type visitedErrors struct {
-	// Map of error pointer addresses to track visited errors
-	// We use uintptr as the key since it's always hashable
-	visited map[uintptr]bool
-}
-
-// newVisitedErrors creates a new visitedErrors tracker.
-func newVisitedErrors() *visitedErrors {
-	return &visitedErrors{
-		visited: make(map[uintptr]bool),
-	}
-}
-
-// contains checks if an error has been visited based on pointer identity.
-func (v *visitedErrors) contains(err error) bool {
-	if err == nil {
-		return false
-	}
-	ptr := errptr.Get(err)
-	return v.visited[ptr]
-}
-
-// add marks an error as visited based on pointer identity.
-func (v *visitedErrors) add(err error) {
-	if err == nil {
-		return
-	}
-	ptr := errptr.Get(err)
-	v.visited[ptr] = true
-}
-
 // Marshal serializes an error to JSON bytes.
 // It returns nil, nil for nil errors.
 //
@@ -136,7 +102,8 @@ func Marshal(err error, opts ...Option) ([]byte, error) {
 		opt(cfg)
 	}
 
-	serialized := toSerializedError(err, cfg, newVisitedErrors(), 0)
+	visited := make(map[uintptr]bool)
+	serialized := toSerializedError(err, cfg, visited, 0)
 	return json.Marshal(serialized)
 }
 
@@ -156,7 +123,8 @@ func MarshalIndent(err error, prefix, indent string, opts ...Option) ([]byte, er
 		opt(cfg)
 	}
 
-	serialized := toSerializedError(err, cfg, newVisitedErrors(), 0)
+	visited := make(map[uintptr]bool)
+	serialized := toSerializedError(err, cfg, visited, 0)
 	return json.MarshalIndent(serialized, prefix, indent)
 }
 
@@ -179,11 +147,12 @@ func ToSerializedError(err error, opts ...Option) *SerializedError {
 		opt(cfg)
 	}
 
-	return toSerializedError(err, cfg, newVisitedErrors(), 0)
+	visited := make(map[uintptr]bool)
+	return toSerializedError(err, cfg, visited, 0)
 }
 
 // toSerializedError recursively converts an error to SerializedError.
-func toSerializedError(err error, cfg *config, visited *visitedErrors, depth int) *SerializedError {
+func toSerializedError(err error, cfg *config, visited map[uintptr]bool, depth int) *SerializedError {
 	if err == nil {
 		return nil
 	}
@@ -196,12 +165,15 @@ func toSerializedError(err error, cfg *config, visited *visitedErrors, depth int
 	}
 
 	// Check for circular references
-	if visited.contains(err) {
-		return &SerializedError{
-			Message: "(circular reference)",
+	if err != nil {
+		ptr := errptr.Get(err)
+		if visited[ptr] {
+			return &SerializedError{
+				Message: "(circular reference)",
+			}
 		}
+		visited[ptr] = true
 	}
-	visited.add(err)
 
 	result := &SerializedError{
 		Message: err.Error(),
@@ -263,7 +235,7 @@ func serializeStackTrace(err error, cfg *config, result *SerializedError) {
 }
 
 // serializeCauses handles unwrapping and serialization of error causes.
-func serializeCauses(err error, cfg *config, visited *visitedErrors, depth int, result *SerializedError) {
+func serializeCauses(err error, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
 	// Check for multi-error first
 	type unwrapper interface {
 		Unwrap() []error
@@ -278,7 +250,7 @@ func serializeCauses(err error, cfg *config, visited *visitedErrors, depth int, 
 }
 
 // serializeMultiError serializes multiple error causes.
-func serializeMultiError(u unwrapper, cfg *config, visited *visitedErrors, depth int, result *SerializedError) {
+func serializeMultiError(u unwrapper, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
 	unwrapped := u.Unwrap()
 	if len(unwrapped) == 0 {
 		return
@@ -301,7 +273,7 @@ type unwrapper interface {
 }
 
 // serializeSingleCause serializes a single error cause.
-func serializeSingleCause(err error, cfg *config, visited *visitedErrors, depth int, result *SerializedError) {
+func serializeSingleCause(err error, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
 	cause := errors.Unwrap(err)
 	if cause == nil {
 		return
@@ -310,7 +282,10 @@ func serializeSingleCause(err error, cfg *config, visited *visitedErrors, depth 
 	// If the cause is a carrier, skip it and go to its inner cause
 	if isCarrier(cause) {
 		// Add the carrier to visited to prevent infinite loops
-		visited.add(cause)
+		if cause != nil {
+			ptr := errptr.Get(cause)
+			visited[ptr] = true
+		}
 		innerCause := errors.Unwrap(cause)
 		if innerCause != nil && (cfg.includeStandardErrors || isErrxError(innerCause)) {
 			result.Cause = toSerializedError(innerCause, cfg, visited, depth+1)
