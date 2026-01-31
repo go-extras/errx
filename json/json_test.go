@@ -653,18 +653,25 @@ func TestMarshal_PointerIdentity(t *testing.T) {
 }
 
 // TestMarshal_SamePointerMultipleTimes verifies that the same error instance
-// appearing multiple times in the chain is only serialized once.
+// appearing multiple times in the error tree is handled correctly by circular detection.
 func TestMarshal_SamePointerMultipleTimes(t *testing.T) {
-	baseErr := &unhashableError{data: map[string]any{"key": "value"}}
+	baseErr := &unhashableError{
+		message: "shared error",
+		data:    map[string]any{"key": "value"},
+	}
 
-	// Create a chain where the same error appears as the base
-	err1 := errx.Wrap("first", baseErr)
-	err2 := errx.Wrap("second", err1)
+	// Create a multi-error where the same error instance appears twice
+	// This simulates a scenario where the same error is referenced multiple times
+	multiErr := &testMultiError{
+		message: "multiple errors occurred",
+		errs: []error{
+			errx.Wrap("first occurrence", baseErr),
+			errx.Wrap("second occurrence", baseErr), // Same instance!
+		},
+	}
 
-	// Wrap again
-	wrapped := errx.Wrap("outer", err2)
-
-	data, err := errxjson.Marshal(wrapped)
+	// Marshal should handle the same error instance appearing multiple times
+	data, err := errxjson.Marshal(multiErr)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -674,8 +681,19 @@ func TestMarshal_SamePointerMultipleTimes(t *testing.T) {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
 
-	if result.Message == "" {
-		t.Error("Message should not be empty")
+	if result.Message != "multiple errors occurred" {
+		t.Errorf("Message = %q, want %q", result.Message, "multiple errors occurred")
+	}
+
+	// Should have two causes (the two wrappers)
+	if len(result.Causes) != 2 {
+		t.Fatalf("len(Causes) = %d, want 2", len(result.Causes))
+	}
+
+	// Both causes should have been serialized (even though they share the same base error)
+	// The circular detection should prevent infinite loops but still serialize both branches
+	if result.Causes[0].Message == "" || result.Causes[1].Message == "" {
+		t.Error("Both causes should have messages")
 	}
 }
 
@@ -687,7 +705,7 @@ func TestMarshal_NilErrorInChain(t *testing.T) {
 		t.Fatalf("Wrapping nil should return nil, got: %v", err)
 	}
 
-	// Marshal nil error should return empty JSON
+	// Marshal nil error should return empty or null JSON
 	data, marshalErr := errxjson.Marshal(err)
 	if marshalErr != nil {
 		t.Fatalf("Marshal error: %v", marshalErr)
