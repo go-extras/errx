@@ -311,6 +311,8 @@ func serializeSingleCause(err error, cfg *config, visited *visitedErrors, depth 
 
 	// If the cause is a carrier, skip it and go to its inner cause
 	if isCarrier(cause) {
+		// Add the carrier to visited to prevent infinite loops
+		visited.add(cause)
 		innerCause := errors.Unwrap(cause)
 		if innerCause != nil && (cfg.includeStandardErrors || isErrxError(innerCause)) {
 			result.Cause = toSerializedError(innerCause, cfg, visited, depth+1)

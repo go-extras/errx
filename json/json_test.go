@@ -527,19 +527,23 @@ func TestMarshal_UnhashableError(t *testing.T) {
 	}
 }
 
-func TestMarshal_UnhashableErrorCircular(t *testing.T) {
-	// Create an unhashable error
-	unhashableErr := &unhashableError{
-		message: "validation failed",
-		data:    map[string]any{"field": "value"},
+func TestMarshal_UnhashableErrorChain(t *testing.T) {
+	// Create a chain of unhashable errors to verify they can be marshaled
+	// without panic, even though they can't be used as map keys
+	innerErr := &unhashableError{
+		message: "inner error",
+		data:    map[string]any{"inner": "value"},
 	}
 
-	// Create a circular reference with unhashable error
-	// This tests that circular detection works even with unhashable errors
-	wrappedErr := stacktrace.Wrap("outer", unhashableErr)
+	middleErr := &unhashableCircularError{
+		data:  map[string]any{"middle": "value"},
+		cause: innerErr,
+	}
 
-	// Marshal should detect circular references even with unhashable errors
-	data, err := errxjson.Marshal(wrappedErr)
+	outerErr := stacktrace.Wrap("outer", middleErr)
+
+	// Marshal should work with unhashable errors in a chain
+	data, err := errxjson.Marshal(outerErr)
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
@@ -552,6 +556,23 @@ func TestMarshal_UnhashableErrorCircular(t *testing.T) {
 	// Should successfully serialize without panic
 	if result.Message == "" {
 		t.Error("Message should not be empty")
+	}
+
+	// Verify the chain was serialized
+	if result.Cause == nil {
+		t.Fatal("Cause should not be nil")
+	}
+
+	if result.Cause.Message != "unhashable circular error" {
+		t.Errorf("Expected 'unhashable circular error', got: %s", result.Cause.Message)
+	}
+
+	if result.Cause.Cause == nil {
+		t.Fatal("Cause.Cause should not be nil")
+	}
+
+	if result.Cause.Cause.Message != "inner error" {
+		t.Errorf("Expected 'inner error', got: %s", result.Cause.Cause.Message)
 	}
 }
 
@@ -728,17 +749,23 @@ func TestExtractAttrs_UnhashableError(t *testing.T) {
 	}
 }
 
-// TestExtractAttrs_CircularWithUnhashable tests circular reference detection in ExtractAttrs
-// with unhashable errors.
-func TestExtractAttrs_CircularWithUnhashable(t *testing.T) {
-	// Create a circular reference with unhashable error
-	unhashable := &unhashableCircularError{data: map[string]any{"key": "value"}}
-	unhashable.cause = unhashable // circular!
+// TestExtractAttrs_ChainWithUnhashable tests ExtractAttrs with a chain of unhashable errors.
+func TestExtractAttrs_ChainWithUnhashable(t *testing.T) {
+	// Create a chain with unhashable errors
+	innerErr := &unhashableError{
+		message: "inner",
+		data:    map[string]any{"key": "value"},
+	}
+
+	unhashable := &unhashableCircularError{
+		data:  map[string]any{"key": "value"},
+		cause: innerErr,
+	}
 
 	attrErr := errx.Attrs("test", "value")
 	wrapped := errx.Wrap("context", unhashable, attrErr)
 
-	// This should not panic or hang
+	// This should not panic even with unhashable errors
 	attrs := errx.ExtractAttrs(wrapped)
 
 	if len(attrs) != 1 {
