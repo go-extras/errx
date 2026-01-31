@@ -690,10 +690,30 @@ func TestMarshal_SamePointerMultipleTimes(t *testing.T) {
 		t.Fatalf("len(Causes) = %d, want 2", len(result.Causes))
 	}
 
-	// Both causes should have been serialized (even though they share the same base error)
-	// The circular detection should prevent infinite loops but still serialize both branches
-	if result.Causes[0].Message == "" || result.Causes[1].Message == "" {
-		t.Error("Both causes should have messages")
+	// First wrapper should be fully serialized
+	if result.Causes[0].Message != "first occurrence: shared error" {
+		t.Errorf("Causes[0].Message = %q, want %q", result.Causes[0].Message, "first occurrence: shared error")
+	}
+	// First wrapper should have the base error as its cause
+	if result.Causes[0].Cause == nil {
+		t.Fatal("Causes[0].Cause should not be nil")
+	}
+	if result.Causes[0].Cause.Message != "shared error" {
+		t.Errorf("Causes[0].Cause.Message = %q, want %q", result.Causes[0].Cause.Message, "shared error")
+	}
+
+	// Second wrapper should also be serialized
+	if result.Causes[1].Message != "second occurrence: shared error" {
+		t.Errorf("Causes[1].Message = %q, want %q", result.Causes[1].Message, "second occurrence: shared error")
+	}
+	// Second wrapper's cause should be marked as circular reference
+	// because baseErr was already visited when processing the first branch
+	if result.Causes[1].Cause == nil {
+		t.Fatal("Causes[1].Cause should not be nil")
+	}
+	if result.Causes[1].Cause.Message != "(circular reference)" {
+		t.Errorf("Causes[1].Cause.Message = %q, want %q (circular reference detected)",
+			result.Causes[1].Cause.Message, "(circular reference)")
 	}
 }
 
