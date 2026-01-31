@@ -51,6 +51,49 @@ func ExampleClassify() {
 	// Is validation error: true
 }
 
+// ExampleClassifyNew demonstrates creating and classifying an error in one step
+func ExampleClassifyNew() {
+	// Define classification errors
+	var (
+		ErrDatabase  = errors.New("database error")
+		ErrRetryable = errors.New("retryable error")
+	)
+
+	// Create a new error and classify it in one step
+	err := compat.ClassifyNew("connection timeout", ErrDatabase, ErrRetryable)
+
+	fmt.Println(err.Error())
+	fmt.Println("Is database error:", errors.Is(err, ErrDatabase))
+	fmt.Println("Is retryable:", errors.Is(err, ErrRetryable))
+
+	// Output:
+	// connection timeout
+	// Is database error: true
+	// Is retryable: true
+}
+
+// ExampleClassifyNew_withErrxTypes demonstrates ClassifyNew with errx types
+func ExampleClassifyNew_withErrxTypes() {
+	// Mix standard errors with errx types
+	var ErrNotFound = errors.New("not found")
+
+	displayable := errx.NewDisplayable("The requested user does not exist")
+	attrErr := errx.Attrs("user_id", 12345, "table", "users")
+
+	err := compat.ClassifyNew("user record missing from database", ErrNotFound, displayable, attrErr)
+
+	fmt.Println("Error:", err.Error())
+	fmt.Println("Display text:", errx.DisplayText(err))
+	fmt.Println("Is not found:", errors.Is(err, ErrNotFound))
+	fmt.Println("Has attributes:", errx.HasAttrs(err))
+
+	// Output:
+	// Error: user record missing from database
+	// Display text: The requested user does not exist
+	// Is not found: true
+	// Has attributes: true
+}
+
 // ExampleWrap_withErrxTypes demonstrates mixing standard errors with errx types
 func ExampleWrap_withErrxTypes() {
 	// Define classification error

@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-01-31
+
+This release adds a new convenience function `ClassifyNew` for creating and classifying errors in a single step.
+
+### Added
+
+- **New `ClassifyNew()` function** - Added `ClassifyNew(text string, classifications ...Classified) error` function to create a new error and immediately classify it with one or more classifications. This convenience function makes the code more concise and readable:
+  ```go
+  // Before
+  err := errx.Classify(errors.New("some error"), ErrNotFound, ErrDatabase)
+
+  // After
+  err := errx.ClassifyNew("some error", ErrNotFound, ErrDatabase)
+  ```
+  This also eliminates the need to import the `errors` package in many cases.
+
+- **compat.ClassifyNew()** - Added `compat.ClassifyNew(text string, classifications ...error) error` function that accepts standard Go `error` interface for classifications, maintaining compatibility with existing error types.
+
+- **stacktrace.ClassifyNew()** - Added `stacktrace.ClassifyNew(text string, classifications ...errx.Classified) error` function that automatically captures stack traces at the call site while creating and classifying errors.
+
+### Testing
+
+- Added 15 comprehensive unit tests across all three packages (errx, compat, stacktrace)
+- Added 6 example tests with output verification demonstrating usage patterns
+- All tests pass with 100% success rate
+
 ## [1.1.0] - 2026-01-31
 
 This release refactors the attribute API to improve naming consistency and clarity. The `Attrs` type has been renamed to `AttrList` to avoid confusion with the new `Attrs()` function, which provides a more concise API for creating attributed errors.
@@ -104,5 +130,7 @@ This release provides a complete, production-ready error handling solution with 
 - **Issue templates** - Bug reports, feature requests, and questions
 - **Pull request template** - Standardized PR process
 
+[1.2.0]: https://github.com/go-extras/errx/releases/tag/v1.2.0
+[1.1.0]: https://github.com/go-extras/errx/releases/tag/v1.1.0
 [1.0.0]: https://github.com/go-extras/errx/releases/tag/v1.0.0
 

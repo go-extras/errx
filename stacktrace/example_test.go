@@ -74,6 +74,55 @@ func ExampleClassify() {
 	// Has trace: true
 }
 
+// ExampleClassifyNew demonstrates creating and classifying an error with automatic trace capture
+func ExampleClassifyNew() {
+	var (
+		ErrDatabase  = errx.NewSentinel("database error")
+		ErrRetryable = errx.NewSentinel("retryable error")
+	)
+
+	// Create a new error, classify it, and capture stack trace in one step
+	err := stacktrace.ClassifyNew("connection timeout", ErrDatabase, ErrRetryable)
+
+	fmt.Println(err.Error())
+	fmt.Println("Is database error:", errors.Is(err, ErrDatabase))
+	fmt.Println("Is retryable:", errors.Is(err, ErrRetryable))
+	fmt.Println("Has trace:", stacktrace.Extract(err) != nil)
+
+	// Output:
+	// connection timeout
+	// Is database error: true
+	// Is retryable: true
+	// Has trace: true
+}
+
+// ExampleClassifyNew_withDisplayable demonstrates ClassifyNew with displayable errors
+func ExampleClassifyNew_withDisplayable() {
+	var ErrNotFound = errx.NewSentinel("not found")
+	displayErr := errx.NewDisplayable("The requested resource was not found")
+
+	// Create error with classification, displayable message, and stack trace
+	err := stacktrace.ClassifyNew("user record missing from database", ErrNotFound, displayErr)
+
+	// Full error for logging
+	fmt.Println("Full error:", err.Error())
+
+	// User-facing message
+	fmt.Println("Display text:", errx.DisplayText(err))
+
+	// Classification check
+	fmt.Println("Is not found:", errors.Is(err, ErrNotFound))
+
+	// Stack trace available
+	fmt.Println("Has trace:", stacktrace.Extract(err) != nil)
+
+	// Output:
+	// Full error: user record missing from database
+	// Display text: The requested resource was not found
+	// Is not found: true
+	// Has trace: true
+}
+
 // ExampleExtract demonstrates extracting and formatting stack traces
 func ExampleExtract() {
 	// Create an error with a stack trace
@@ -94,7 +143,7 @@ func ExampleExtract() {
 
 	// Output:
 	// Stack trace (7 frames):
-	//   github.com/go-extras/errx/stacktrace_test.ExampleExtract:80
+	//   github.com/go-extras/errx/stacktrace_test.ExampleExtract:129
 	//   testing.runExample:63
 	//   testing.runExamples:41
 	//   ...
