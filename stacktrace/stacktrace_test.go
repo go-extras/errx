@@ -219,7 +219,7 @@ func TestIntegrationWithDisplayable(t *testing.T) {
 
 // TestIntegrationWithAttrs verifies stacktrace works with attributed errors
 func TestIntegrationWithAttrs(t *testing.T) {
-	attrErr := errx.WithAttrs("user_id", 123, "action", "delete")
+	attrErr := errx.Attrs("user_id", 123, "action", "delete")
 	err := stacktrace.Wrap("operation failed", attrErr)
 
 	// Verify attributes
@@ -244,7 +244,7 @@ func TestComplexErrorChain(t *testing.T) {
 
 	// Build a complex error chain
 	baseErr := errors.New("database error")
-	attrErr := errx.WithAttrs("table", "users", "id", 42)
+	attrErr := errx.Attrs("table", "users", "id", 42)
 	displayErr := errx.NewDisplayable("Record not found")
 
 	err := stacktrace.Wrap("query failed",

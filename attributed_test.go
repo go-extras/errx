@@ -11,7 +11,7 @@ import (
 )
 
 func TestWithAttrs(t *testing.T) {
-	attributed := errx.WithAttrs(
+	attributed := errx.Attrs(
 		errx.Attr{Key: "user_id", Value: 123},
 		errx.Attr{Key: "action", Value: "delete"},
 	)
@@ -48,7 +48,7 @@ func TestFromAttrMap(t *testing.T) {
 }
 
 func TestHasAttrs_WithAttributed(t *testing.T) {
-	attributed := errx.WithAttrs(errx.Attr{Key: "key", Value: "value"})
+	attributed := errx.Attrs(errx.Attr{Key: "key", Value: "value"})
 
 	if !errx.HasAttrs(attributed) {
 		t.Error("expected HasAttrs to return true")
@@ -70,7 +70,7 @@ func TestHasAttrs_WithNil(t *testing.T) {
 }
 
 func TestHasAttrs_WithWrappedAttributed(t *testing.T) {
-	attributed := errx.WithAttrs(errx.Attr{Key: "key", Value: "value"})
+	attributed := errx.Attrs(errx.Attr{Key: "key", Value: "value"})
 	wrapped := fmt.Errorf("context: %w", attributed)
 
 	if !errx.HasAttrs(wrapped) {
@@ -79,7 +79,7 @@ func TestHasAttrs_WithWrappedAttributed(t *testing.T) {
 }
 
 func TestExtractAttrs_WithAttributed(t *testing.T) {
-	attributed := errx.WithAttrs(
+	attributed := errx.Attrs(
 		errx.Attr{Key: "user_id", Value: 123},
 		errx.Attr{Key: "action", Value: "delete"},
 	)
@@ -115,7 +115,7 @@ func TestExtractAttrs_WithNil(t *testing.T) {
 }
 
 func TestExtractAttrs_WithWrappedAttributed(t *testing.T) {
-	attributed := errx.WithAttrs(errx.Attr{Key: "key", Value: "value"})
+	attributed := errx.Attrs(errx.Attr{Key: "key", Value: "value"})
 	wrapped := fmt.Errorf("context: %w", attributed)
 
 	attrs := errx.ExtractAttrs(wrapped)
@@ -129,7 +129,7 @@ func TestExtractAttrs_WithWrappedAttributed(t *testing.T) {
 }
 
 func TestExtractAttrs_WithDeepChain(t *testing.T) {
-	attributed := errx.WithAttrs(errx.Attr{Key: "deep", Value: "value"})
+	attributed := errx.Attrs(errx.Attr{Key: "deep", Value: "value"})
 	level1 := fmt.Errorf("level1: %w", attributed)
 	level2 := fmt.Errorf("level2: %w", level1)
 	level3 := fmt.Errorf("level3: %w", level2)
@@ -145,9 +145,9 @@ func TestExtractAttrs_WithDeepChain(t *testing.T) {
 }
 
 func TestExtractAttrs_WithMultipleAttributed(t *testing.T) {
-	attributed1 := errx.WithAttrs(errx.Attr{Key: "first", Value: 1})
+	attributed1 := errx.Attrs(errx.Attr{Key: "first", Value: 1})
 	wrapped := fmt.Errorf("layer1: %w", attributed1)
-	attributed2 := errx.Classify(wrapped, errx.WithAttrs(errx.Attr{Key: "second", Value: 2}))
+	attributed2 := errx.Classify(wrapped, errx.Attrs(errx.Attr{Key: "second", Value: 2}))
 
 	attrs := errx.ExtractAttrs(attributed2)
 
@@ -192,7 +192,7 @@ func TestFromAttrMap_PreservesValues(t *testing.T) {
 }
 
 func TestWithAttrs_WithEmptyAttrs(t *testing.T) {
-	attributed := errx.WithAttrs()
+	attributed := errx.Attrs()
 
 	if attributed == nil {
 		t.Fatal("expected non-nil error")
@@ -232,7 +232,7 @@ func TestFromAttrMap_WithNilMap(t *testing.T) {
 
 func TestAttrs_WithWrap(t *testing.T) {
 	err := errors.New("test error")
-	attributed := errx.Classify(err, errx.WithAttrs(errx.Attr{Key: "user_id", Value: 123}))
+	attributed := errx.Classify(err, errx.Attrs(errx.Attr{Key: "user_id", Value: 123}))
 	ErrNotFound := errx.NewSentinel("not found")
 	wrapped := errx.Wrap("operation failed", attributed, ErrNotFound)
 
@@ -252,7 +252,7 @@ func TestAttrs_WithWrap(t *testing.T) {
 
 func TestAttrs_WithClassify(t *testing.T) {
 	err := errors.New("test error")
-	attributedCls := errx.WithAttrs(errx.Attr{Key: "key", Value: "value"})
+	attributedCls := errx.Attrs(errx.Attr{Key: "key", Value: "value"})
 	ErrNotFound := errx.NewSentinel("not found")
 	classified := errx.Classify(err, attributedCls, ErrNotFound)
 
@@ -277,7 +277,7 @@ func TestAttrs_WithClassify(t *testing.T) {
 
 func TestAttrs_WithDisplayable(t *testing.T) {
 	displayErr := errx.NewDisplayable("user message")
-	attributed := errx.Classify(displayErr, errx.WithAttrs(errx.Attr{Key: "code", Value: 404}))
+	attributed := errx.Classify(displayErr, errx.Attrs(errx.Attr{Key: "code", Value: 404}))
 
 	// Should be displayable
 	if !errx.IsDisplayable(attributed) {
@@ -309,7 +309,7 @@ func TestAttrs_ComplexScenario(t *testing.T) {
 	// Create a rich error with multiple features
 	ErrValidation := errx.NewSentinel("validation error")
 	displayErr := errx.NewDisplayable("Invalid input provided")
-	attributedCls := errx.WithAttrs(
+	attributedCls := errx.Attrs(
 		errx.Attr{Key: "field", Value: "email"},
 		errx.Attr{Key: "value", Value: "invalid@"},
 	)
@@ -346,7 +346,7 @@ func TestAttrs_ComplexScenario(t *testing.T) {
 }
 
 func TestExtractAttrs_OrderPreservation(t *testing.T) {
-	attributed := errx.WithAttrs(
+	attributed := errx.Attrs(
 		errx.Attr{Key: "first", Value: 1},
 		errx.Attr{Key: "second", Value: 2},
 		errx.Attr{Key: "third", Value: 3},
@@ -370,10 +370,10 @@ func TestExtractAttrs_OrderPreservation(t *testing.T) {
 	}
 }
 
-// TestWithAttrs_OddNumberOfArgs tests WithAttrs with odd number of string arguments
+// TestWithAttrs_OddNumberOfArgs tests Attrs with odd number of string arguments
 func TestWithAttrs_OddNumberOfArgs(t *testing.T) {
 	// When a string is the last argument with no value, it gets !BADKEY
-	attributed := errx.WithAttrs("key1", "value1", "key2")
+	attributed := errx.Attrs("key1", "value1", "key2")
 
 	attrs := errx.ExtractAttrs(attributed)
 
@@ -392,10 +392,10 @@ func TestWithAttrs_OddNumberOfArgs(t *testing.T) {
 	}
 }
 
-// TestWithAttrs_NonStringNonAttr tests WithAttrs with non-string, non-Attr values
+// TestWithAttrs_NonStringNonAttr tests Attrs with non-string, non-Attr values
 func TestWithAttrs_NonStringNonAttr(t *testing.T) {
 	// Non-string, non-Attr values get !BADKEY as key
-	attributed := errx.WithAttrs(123, 456, true)
+	attributed := errx.Attrs(123, 456, true)
 
 	attrs := errx.ExtractAttrs(attributed)
 
@@ -415,10 +415,10 @@ func TestWithAttrs_NonStringNonAttr(t *testing.T) {
 	}
 }
 
-// TestWithAttrs_MixedFormats tests WithAttrs with mixed input formats
+// TestWithAttrs_MixedFormats tests Attrs with mixed input formats
 func TestWithAttrs_MixedFormats(t *testing.T) {
 	// Mix of key-value pairs, Attr structs, and slices
-	attributed := errx.WithAttrs(
+	attributed := errx.Attrs(
 		"key1", "value1",
 		errx.Attr{Key: "key2", Value: "value2"},
 		[]errx.Attr{{Key: "key3", Value: "value3"}, {Key: "key4", Value: "value4"}},
@@ -449,7 +449,7 @@ func TestWithAttrs_MixedFormats(t *testing.T) {
 // TestWithAttrs_StringFollowedByNonString tests string key followed by non-string value
 func TestWithAttrs_StringFollowedByNonString(t *testing.T) {
 	// String keys can have any type of value
-	attributed := errx.WithAttrs(
+	attributed := errx.Attrs(
 		"int_key", 42,
 		"bool_key", true,
 		"nil_key", nil,
@@ -476,15 +476,15 @@ func TestWithAttrs_StringFollowedByNonString(t *testing.T) {
 	}
 }
 
-// TestWithAttrs_AttrsTypeAlias tests using Attrs type alias
+// TestWithAttrs_AttrsTypeAlias tests using AttrList type alias
 func TestWithAttrs_AttrsTypeAlias(t *testing.T) {
-	// Attrs is an alias for []Attr and should work the same
-	attrsList := errx.Attrs{
+	// AttrList is an alias for []Attr and should work the same
+	attrsList := errx.AttrList{
 		{Key: "key1", Value: "value1"},
 		{Key: "key2", Value: "value2"},
 	}
 
-	attributed := errx.WithAttrs(attrsList)
+	attributed := errx.Attrs(attrsList)
 
 	attrs := errx.ExtractAttrs(attributed)
 
@@ -516,9 +516,9 @@ func (m *multiError) Unwrap() []error {
 // TestExtractAttrs_WithMultiError tests ExtractAttrs with Go 1.20+ multi-errors
 func TestExtractAttrs_WithMultiError(t *testing.T) {
 	// Create attributed errors
-	attr1 := errx.WithAttrs("key1", "value1")
-	attr2 := errx.WithAttrs("key2", "value2")
-	attr3 := errx.WithAttrs("key3", "value3")
+	attr1 := errx.Attrs("key1", "value1")
+	attr2 := errx.Attrs("key2", "value2")
+	attr3 := errx.Attrs("key3", "value3")
 
 	// Create a multi-error containing attributed errors
 	multiErr := &multiError{
@@ -554,8 +554,8 @@ func TestExtractAttrs_WithMultiError(t *testing.T) {
 // TestExtractAttrs_WithNestedMultiError tests ExtractAttrs with nested multi-errors
 func TestExtractAttrs_WithNestedMultiError(t *testing.T) {
 	// Create attributed errors
-	attr1 := errx.WithAttrs("key1", "value1")
-	attr2 := errx.WithAttrs("key2", "value2")
+	attr1 := errx.Attrs("key1", "value1")
+	attr2 := errx.Attrs("key2", "value2")
 
 	// Create nested multi-errors
 	innerMulti := &multiError{
@@ -594,7 +594,7 @@ func TestExtractAttrs_WithNestedMultiError(t *testing.T) {
 // TestHasAttrs_WithMultiError tests HasAttrs with multi-errors
 func TestHasAttrs_WithMultiError(t *testing.T) {
 	// Create attributed error
-	attr := errx.WithAttrs("key", "value")
+	attr := errx.Attrs("key", "value")
 
 	// Create multi-error containing attributed error
 	multiErr := &multiError{
@@ -619,12 +619,12 @@ func TestHasAttrs_WithMultiError(t *testing.T) {
 func TestAttrs_ToSlogAttrs(t *testing.T) {
 	tests := []struct {
 		name     string
-		attrs    errx.Attrs
+		attrs    errx.AttrList
 		expected []slog.Attr
 	}{
 		{
 			name: "basic conversion",
-			attrs: errx.Attrs{
+			attrs: errx.AttrList{
 				{Key: "user_id", Value: 123},
 				{Key: "action", Value: "delete"},
 			},
@@ -635,7 +635,7 @@ func TestAttrs_ToSlogAttrs(t *testing.T) {
 		},
 		{
 			name: "mixed types",
-			attrs: errx.Attrs{
+			attrs: errx.AttrList{
 				{Key: "string", Value: "test"},
 				{Key: "int", Value: 42},
 				{Key: "bool", Value: true},
@@ -650,7 +650,7 @@ func TestAttrs_ToSlogAttrs(t *testing.T) {
 		},
 		{
 			name:     "empty attrs",
-			attrs:    errx.Attrs{},
+			attrs:    errx.AttrList{},
 			expected: nil,
 		},
 		{
@@ -686,7 +686,7 @@ func TestAttrs_ToSlogAttrs(t *testing.T) {
 
 func TestAttrs_ToSlogAttrs_Integration(t *testing.T) {
 	// Create an error with attributes
-	err := errx.WithAttrs("user_id", 123, "action", "delete", "timestamp", "2024-01-01")
+	err := errx.Attrs("user_id", 123, "action", "delete", "timestamp", "2024-01-01")
 
 	// Extract attributes
 	attrs := errx.ExtractAttrs(err)
@@ -712,12 +712,12 @@ func TestAttrs_ToSlogAttrs_Integration(t *testing.T) {
 func TestAttrs_ToSlogArgs(t *testing.T) {
 	tests := []struct {
 		name     string
-		attrs    errx.Attrs
+		attrs    errx.AttrList
 		expected []any
 	}{
 		{
 			name: "basic conversion",
-			attrs: errx.Attrs{
+			attrs: errx.AttrList{
 				{Key: "user_id", Value: 123},
 				{Key: "action", Value: "delete"},
 			},
@@ -728,7 +728,7 @@ func TestAttrs_ToSlogArgs(t *testing.T) {
 		},
 		{
 			name: "mixed types",
-			attrs: errx.Attrs{
+			attrs: errx.AttrList{
 				{Key: "string", Value: "test"},
 				{Key: "int", Value: 42},
 				{Key: "bool", Value: true},
@@ -743,7 +743,7 @@ func TestAttrs_ToSlogArgs(t *testing.T) {
 		},
 		{
 			name:     "empty attrs",
-			attrs:    errx.Attrs{},
+			attrs:    errx.AttrList{},
 			expected: nil,
 		},
 		{
@@ -788,7 +788,7 @@ func TestAttrs_ToSlogArgs(t *testing.T) {
 
 func TestAttrs_ToSlogArgs_Integration(t *testing.T) {
 	// Create an error with attributes
-	err := errx.WithAttrs("user_id", 123, "action", "delete", "timestamp", "2024-01-01")
+	err := errx.Attrs("user_id", 123, "action", "delete", "timestamp", "2024-01-01")
 
 	// Extract attributes
 	attrs := errx.ExtractAttrs(err)

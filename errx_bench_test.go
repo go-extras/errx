@@ -194,14 +194,14 @@ func BenchmarkDisplayText_NoDisplayable(b *testing.B) {
 func BenchmarkWithAttrs_KeyValuePairs(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = errx.WithAttrs("key1", "value1", "key2", 123, "key3", true)
+		_ = errx.Attrs("key1", "value1", "key2", 123, "key3", true)
 	}
 }
 
 func BenchmarkWithAttrs_AttrStructs(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = errx.WithAttrs(
+		_ = errx.Attrs(
 			errx.Attr{Key: "key1", Value: "value1"},
 			errx.Attr{Key: "key2", Value: 123},
 			errx.Attr{Key: "key3", Value: true},
@@ -243,7 +243,7 @@ func BenchmarkFromAttrMap_Large(b *testing.B) {
 }
 
 func BenchmarkHasAttrs_Shallow(b *testing.B) {
-	err := errx.WithAttrs("key", "value")
+	err := errx.Attrs("key", "value")
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -253,7 +253,7 @@ func BenchmarkHasAttrs_Shallow(b *testing.B) {
 
 func BenchmarkHasAttrs_Deep(b *testing.B) {
 	var err error
-	err = errx.WithAttrs("key", "value")
+	err = errx.Attrs("key", "value")
 	err = fmt.Errorf("level1: %w", err)
 	err = fmt.Errorf("level2: %w", err)
 	err = fmt.Errorf("level3: %w", err)
@@ -265,7 +265,7 @@ func BenchmarkHasAttrs_Deep(b *testing.B) {
 }
 
 func BenchmarkExtractAttrs_Small(b *testing.B) {
-	err := errx.WithAttrs("key1", "value1", "key2", 123)
+	err := errx.Attrs("key1", "value1", "key2", 123)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -274,7 +274,7 @@ func BenchmarkExtractAttrs_Small(b *testing.B) {
 }
 
 func BenchmarkExtractAttrs_Large(b *testing.B) {
-	err := errx.WithAttrs(
+	err := errx.Attrs(
 		"key1", "value1",
 		"key2", 123,
 		"key3", true,
@@ -293,7 +293,7 @@ func BenchmarkExtractAttrs_Large(b *testing.B) {
 
 func BenchmarkExtractAttrs_Deep(b *testing.B) {
 	var err error
-	err = errx.WithAttrs("key1", "value1", "key2", 123)
+	err = errx.Attrs("key1", "value1", "key2", 123)
 	err = fmt.Errorf("level1: %w", err)
 	err = fmt.Errorf("level2: %w", err)
 	err = fmt.Errorf("level3: %w", err)
@@ -334,7 +334,7 @@ func BenchmarkCombined_RichError(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		baseErr := errors.New("invalid input")
 		displayErr := errx.NewDisplayable("Please provide valid input")
-		attrErr := errx.WithAttrs("field", "email", "value", "invalid@")
+		attrErr := errx.Attrs("field", "email", "value", "invalid@")
 		err := errx.Classify(baseErr, displayErr, attrErr, ErrValidation)
 
 		_ = errors.Is(err, ErrValidation)
@@ -369,7 +369,7 @@ func BenchmarkCombined_APIErrorHandling(b *testing.B) {
 		var err error
 		err = errx.NewDisplayable("Email is required")
 		err = errx.Classify(err, ErrValidation)
-		err = errx.Classify(err, errx.WithAttrs("field", "email"))
+		err = errx.Classify(err, errx.Attrs("field", "email"))
 
 		// Handler logic
 		statusCode := 500

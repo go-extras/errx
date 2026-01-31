@@ -94,7 +94,7 @@ func TestMarshal_DisplayableError(t *testing.T) {
 }
 
 func TestMarshal_AttributedError(t *testing.T) {
-	attrErr := errx.WithAttrs("user_id", 123, "action", "delete")
+	attrErr := errx.Attrs("user_id", 123, "action", "delete")
 	testErr := errx.Classify(errors.New("base error"), attrErr)
 
 	data, err := errxjson.Marshal(testErr)
@@ -212,7 +212,7 @@ func TestMarshal_ComplexError(t *testing.T) {
 	// Create a complex error with all features
 	baseErr := errors.New("connection failed")
 	displayErr := errx.NewDisplayable("Service temporarily unavailable")
-	attrErr := errx.WithAttrs("retry_count", 3, "host", "localhost")
+	attrErr := errx.Attrs("retry_count", 3, "host", "localhost")
 
 	testErr := stacktrace.Wrap("database operation failed",
 		errx.Classify(baseErr, displayErr, attrErr, ErrTimeoutTest))
@@ -451,7 +451,7 @@ func TestMarshal_MultiError(t *testing.T) {
 }
 
 func TestMarshal_EmptyAttributes(t *testing.T) {
-	attrErr := errx.WithAttrs()
+	attrErr := errx.Attrs()
 	testErr := errx.Classify(errors.New("base"), attrErr)
 
 	data, err := errxjson.Marshal(testErr)

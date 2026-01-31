@@ -60,7 +60,7 @@ func ExampleWrap_withErrxTypes() {
 
 	// Mix standard errors with errx types
 	displayable := errx.NewDisplayable("The requested user does not exist")
-	attrErr := errx.WithAttrs("user_id", 12345, "table", "users")
+	attrErr := errx.Attrs("user_id", 12345, "table", "users")
 
 	err := compat.Wrap("lookup failed", baseErr, ErrNotFound, displayable, attrErr)
 
@@ -135,7 +135,7 @@ func ExampleWrap_withAttributes() {
 	baseErr := errors.New("query timeout")
 
 	// Create attributed error for structured logging
-	attrErr := errx.WithAttrs(
+	attrErr := errx.Attrs(
 		"query", "SELECT * FROM users WHERE id = ?",
 		"timeout_ms", 5000,
 		"retry_count", 3,

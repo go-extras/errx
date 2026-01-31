@@ -49,7 +49,7 @@ func ExampleMarshalIndent() {
 
 // ExampleToSerializedError demonstrates converting an error to a struct
 func ExampleToSerializedError() {
-	attrErr := errx.WithAttrs("user_id", 42)
+	attrErr := errx.Attrs("user_id", 42)
 	err := errx.Classify(errors.New("operation failed"), attrErr, ErrDatabase)
 
 	serialized := errxjson.ToSerializedError(err)
@@ -131,7 +131,7 @@ func Example_displayableError() {
 
 // Example_attributedError demonstrates serializing errors with attributes
 func Example_attributedError() {
-	attrErr := errx.WithAttrs(
+	attrErr := errx.Attrs(
 		"user_id", 12345,
 		"action", "delete",
 		"resource", "account",
@@ -172,7 +172,7 @@ func Example_complexError() {
 	// Build a rich error with all features
 	baseErr := errors.New("connection timeout")
 	displayErr := errx.NewDisplayable("Service temporarily unavailable")
-	attrErr := errx.WithAttrs("retry_count", 3, "host", "localhost")
+	attrErr := errx.Attrs("retry_count", 3, "host", "localhost")
 
 	err := stacktrace.Wrap("database query failed",
 		baseErr, displayErr, attrErr, ErrDatabase)
@@ -218,7 +218,7 @@ func Example_errorChain() {
 func Example_apiResponse() {
 	// Simulate an error from the service layer
 	displayErr := errx.NewDisplayable("User not found")
-	attrErr := errx.WithAttrs("user_id", "12345")
+	attrErr := errx.Attrs("user_id", "12345")
 	serviceErr := errx.Classify(displayErr, ErrNotFound, attrErr)
 
 	// Serialize for API response

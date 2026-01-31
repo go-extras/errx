@@ -170,7 +170,7 @@ func TestClassify_WithMultipleClassifications(t *testing.T) {
 func TestClassify_WithErrxClassified(t *testing.T) {
 	baseErr := errors.New("base error")
 	sentinel := errx.NewSentinel("sentinel")
-	attrErr := errx.WithAttrs("key", "value")
+	attrErr := errx.Attrs("key", "value")
 
 	err := compat.Classify(baseErr, sentinel, attrErr, ErrValidation)
 
@@ -194,7 +194,7 @@ func TestClassify_WithErrxClassified(t *testing.T) {
 
 func TestWrap_WithAttributes(t *testing.T) {
 	baseErr := errors.New("base error")
-	attrErr := errx.WithAttrs("user_id", 123, "action", "delete")
+	attrErr := errx.Attrs("user_id", 123, "action", "delete")
 
 	err := compat.Wrap("context", baseErr, attrErr, ErrDatabase)
 

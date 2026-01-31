@@ -69,7 +69,7 @@ You can freely mix standard errors with `errx.Classified` types:
 
 ```go
 displayable := errx.NewDisplayable("User not found")
-attrErr := errx.WithAttrs("user_id", 123)
+attrErr := errx.Attrs("user_id", 123)
 
 err := compat.Wrap("lookup failed", baseErr, ErrNotFound, displayable, attrErr)
 ```
@@ -132,7 +132,7 @@ return compat.Wrap("transaction failed", err, ErrDatabase, ErrRetryable)
 ### With Attributes
 
 ```go
-attrErr := errx.WithAttrs("user_id", 123, "action", "delete")
+attrErr := errx.Attrs("user_id", 123, "action", "delete")
 err := compat.Wrap("operation failed", baseErr, ErrDatabase, attrErr)
 
 // Later, extract attributes for logging

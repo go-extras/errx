@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-01-31
+
+This release refactors the attribute API to improve naming consistency and clarity. The `Attrs` type has been renamed to `AttrList` to avoid confusion with the new `Attrs()` function, which provides a more concise API for creating attributed errors.
+
+### Breaking Changes
+
+- **Renamed `Attrs` type to `AttrList`** - The type alias for `[]Attr` has been renamed from `Attrs` to `AttrList`. This is a breaking change for code that directly references the `Attrs` type. Users should update their code to use `AttrList` instead:
+  ```go
+  // Before
+  var attrs errx.Attrs = errx.ExtractAttrs(err)
+
+  // After
+  var attrs errx.AttrList = errx.ExtractAttrs(err)
+  ```
+  Note: Most users are not affected by this change as the type is typically used implicitly through `ExtractAttrs()` return values.
+
+### Added
+
+- **New `Attrs()` function** - Added a new `Attrs(attrs ...any) Classified` function as the primary API for creating attributed errors. This provides a more concise and intuitive name compared to `WithAttrs()`:
+  ```go
+  // New recommended approach
+  attrErr := errx.Attrs("user_id", 123, "action", "delete")
+  return errx.Wrap("operation failed", baseErr, attrErr)
+  ```
+
+### Deprecated
+
+- **Deprecated `WithAttrs()` function** - The `WithAttrs()` function is now deprecated in favor of the new `Attrs()` function. `WithAttrs()` will continue to work for backward compatibility, but users are encouraged to migrate to `Attrs()`:
+  ```go
+  // Deprecated
+  attrErr := errx.WithAttrs("user_id", 123)
+
+  // Recommended
+  attrErr := errx.Attrs("user_id", 123)
+  ```
+
 ## [1.0.0] - 2026-01-15
 
 **First stable release** of errx - a rich error handling library for Go with classification tags, displayable messages, and structured attributes.

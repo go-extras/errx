@@ -252,7 +252,7 @@ Attach key-value metadata for structured logging:
 func processPayment(userID string, amount float64) error {
     if amount < 0 {
         // Create attributed error
-        attrErr := errx.WithAttrs(
+        attrErr := errx.Attrs(
             "user_id", userID,
             "amount", amount,
             "currency", "USD",
@@ -272,14 +272,14 @@ if errx.HasAttrs(err) {
 
 #### Integration with slog
 
-Convert `errx.Attrs` for seamless integration with structured logging. Two methods are provided:
+Convert `errx.AttrList` for seamless integration with structured logging. Two methods are provided:
 
 **Option 1: `ToSlogAttrs()` - Most efficient (recommended)**
 
 Use with `Logger.LogAttrs` for best performance and type safety:
 
 ```go
-err := errx.WithAttrs("user_id", 123, "action", "delete")
+err := errx.Attrs("user_id", 123, "action", "delete")
 attrs := errx.ExtractAttrs(err)
 
 // Convert to []slog.Attr
@@ -295,7 +295,7 @@ logger.LogAttrs(context.Background(), slog.LevelError, "operation failed", slogA
 Use with `Error`, `Info`, `Warn` methods for convenience:
 
 ```go
-err := errx.WithAttrs("user_id", 123, "action", "delete")
+err := errx.Attrs("user_id", 123, "action", "delete")
 attrs := errx.ExtractAttrs(err)
 
 // Convert to []any
@@ -351,7 +351,7 @@ import (
 
 // Create a complex error with all features
 displayErr := errx.NewDisplayable("Service temporarily unavailable")
-attrErr := errx.WithAttrs("retry_count", 3, "host", "localhost")
+attrErr := errx.Attrs("retry_count", 3, "host", "localhost")
 err := errx.Wrap("database operation failed", displayErr, attrErr, ErrTimeout)
 
 // Serialize to JSON
@@ -463,7 +463,7 @@ var (
 func findUserInDB(userID string) error {
     // Simulate database error
     dbErr := errors.New("connection timeout")
-    attrErr := errx.WithAttrs("user_id", userID, "operation", "select")
+    attrErr := errx.Attrs("user_id", userID, "operation", "select")
     return errx.Classify(dbErr, attrErr)
 }
 
@@ -590,7 +590,7 @@ case errors.Is(err, ErrServer):
 if err != nil {
     return errx.Classify(
         err,
-        errx.WithAttrs(
+        errx.Attrs(
             "request_id", reqID,
             "user_id", userID,
             "operation", "create_order",
@@ -636,14 +636,14 @@ func authenticateUser(username, password string) error {
         // Add internal context
         wrappedErr := errx.Wrap("authentication failed", displayErr, ErrUnauthorized)
         // Add debugging attributes
-        attrErr := errx.WithAttrs("username", username, "reason", "user_not_found")
+        attrErr := errx.Attrs("username", username, "reason", "user_not_found")
         return errx.Classify(wrappedErr, attrErr)
     }
-    
+
     if !user.CheckPassword(password) {
         displayErr := errx.NewDisplayable("Invalid username or password")
         wrappedErr := errx.Wrap("password check failed", displayErr, ErrUnauthorized)
-        attrErr := errx.WithAttrs("username", username, "reason", "wrong_password")
+        attrErr := errx.Attrs("username", username, "reason", "wrong_password")
         return errx.Classify(wrappedErr, attrErr)
     }
     
@@ -685,7 +685,7 @@ Full API documentation is available at [pkg.go.dev/github.com/go-extras/errx](ht
 - **`NewDisplayable(message string) error`**
   Creates a user-safe displayable error message.
 
-- **`WithAttrs(keyvals ...any) error`**
+- **`Attrs(keyvals ...any) error`**
   Creates an error with structured key-value attributes.
 
 - **`FromAttrMap(attrs AttrMap) error`**
@@ -713,13 +713,13 @@ Full API documentation is available at [pkg.go.dev/github.com/go-extras/errx](ht
 - **`HasAttrs(err error) bool`**
   Checks if an error chain contains structured attributes.
 
-- **`ExtractAttrs(err error) []Attr`**
+- **`ExtractAttrs(err error) AttrList`**
   Extracts all attributes from an error chain.
 
-- **`(Attrs).ToSlogAttrs() []slog.Attr`**
+- **`(AttrList).ToSlogAttrs() []slog.Attr`**
   Converts extracted attributes to `[]slog.Attr` for use with `slog.Logger.LogAttrs`.
 
-- **`(Attrs).ToSlogArgs() []any`**
+- **`(AttrList).ToSlogArgs() []any`**
   Converts extracted attributes to `[]any` for use with slog convenience methods like `Logger.Error`.
 
 ## Use Cases
