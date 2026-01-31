@@ -132,7 +132,7 @@ func Example_integration() {
 
 	// Combine stack traces with displayable errors and attributes
 	displayErr := errx.NewDisplayable("User not found")
-	attrErr := errx.WithAttrs("user_id", "12345", "action", "fetch")
+	attrErr := errx.Attrs("user_id", "12345", "action", "fetch")
 
 	err := stacktrace.Wrap("failed to get user profile",
 		errx.Classify(displayErr, ErrNotFound, attrErr))

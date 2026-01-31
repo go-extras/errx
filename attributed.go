@@ -133,58 +133,11 @@ func Attrs(attrs ...any) Classified {
 	}
 }
 
-// WithAttrs creates an error with structured attributes for additional context.
-// Attributes can be extracted later using ExtractAttrs.
+// WithAttrs creates an error with structured attributes.
 //
 // Deprecated: Use Attrs instead.
-//
-// # Recommended Usage
-//
-// WithAttrs is typically used in combination with Wrap or Classify to create rich errors
-// with both meaningful error messages and structured metadata:
-//
-//	// RECOMMENDED: Combine with Wrap for context + attributes
-//	attrErr := errx.WithAttrs("user_id", 123, "action", "delete")
-//	return errx.Wrap("failed to delete user", baseErr, attrErr)
-//
-//	// RECOMMENDED: Combine with Classify for classification + attributes
-//	attrErr := errx.WithAttrs("retry_count", 3)
-//	return errx.Classify(baseErr, ErrRetryable, attrErr)
-//
-// Using WithAttrs alone produces a less informative error message that only shows
-// the attribute list. For better error messages, always combine it with Wrap or Classify.
-//
-// # Input Formats
-//
-// WithAttrs accepts multiple input formats:
-//   - Key-value pairs: WithAttrs("key1", value1, "key2", value2)
-//   - Attr structs: WithAttrs(Attr{Key: "key1", Value: value1}, Attr{Key: "key2", Value: value2})
-//   - Attr slices: WithAttrs([]Attr{{Key: "key1", Value: value1}, {Key: "key2", Value: value2}})
-//   - Mixed formats: WithAttrs("key1", value1, Attr{Key: "key2", Value: value2})
-//
-// The arguments are processed following a structured pattern (similar to slog):
-//   - If an argument is an Attr, it is used as is.
-//   - If an argument is an []Attr or AttrList, all attributes are appended.
-//   - If an argument is a string and this is not the last argument,
-//     the following argument is treated as the value and the two are combined into an Attr.
-//   - Otherwise, the argument is treated as a value with key "!BADKEY".
-//
-// The "!BADKEY" key is used for malformed arguments to help identify issues during debugging.
-// This behavior matches the slog package's handling of malformed key-value pairs.
-//
-// Examples:
-//
-//	WithAttrs("key", "value")                    // Normal key-value pair
-//	WithAttrs("key")                             // Odd number: Attr{Key: "!BADKEY", Value: "key"}
-//	WithAttrs(123)                               // Non-string: Attr{Key: "!BADKEY", Value: 123}
-//	WithAttrs("key", 123)                        // String key with int value: Attr{Key: "key", Value: 123}
-//	WithAttrs(Attr{Key: "k", Value: "v"})        // Direct Attr usage
-//	WithAttrs([]Attr{{Key: "k", Value: "v"}})    // Slice of Attrs
 func WithAttrs(attrs ...any) Classified {
-	parsedAttrs := parseAttrs(attrs)
-	return &attributed{
-		attrs: parsedAttrs,
-	}
+	return Attrs(attrs...)
 }
 
 // parseAttrs converts various input formats into a slice of Attr.
@@ -237,14 +190,14 @@ func parseAttrs(attrs []any) []Attr {
 // # Order Non-Determinism
 //
 // WARNING: The order of attributes in the resulting error is non-deterministic because
-// Go map iteration order is randomized. If you need deterministic ordering, use WithAttrs
+// Go map iteration order is randomized. If you need deterministic ordering, use Attrs
 // with a slice of Attr instead:
 //
 //	// Non-deterministic order
 //	err := errx.FromAttrMap(map[string]any{"key1": "val1", "key2": "val2"})
 //
 //	// Deterministic order
-//	err := errx.WithAttrs(
+//	err := errx.Attrs(
 //	    errx.Attr{Key: "key1", Value: "val1"},
 //	    errx.Attr{Key: "key2", Value: "val2"},
 //	)
@@ -253,7 +206,7 @@ func FromAttrMap(attrMap AttrMap) Classified {
 	for k, v := range attrMap {
 		attrs = append(attrs, Attr{Key: k, Value: v})
 	}
-	return WithAttrs(attrs)
+	return Attrs(attrs)
 }
 
 type attributed struct {
