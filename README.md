@@ -719,7 +719,7 @@ Full API documentation is available at [pkg.go.dev/github.com/go-extras/errx](ht
 - **`(AttrList).ToSlogAttrs() []slog.Attr`**
   Converts extracted attributes to `[]slog.Attr` for use with `slog.Logger.LogAttrs`.
 
-- **`(Attrs).ToSlogArgs() []any`**
+- **`(AttrList).ToSlogArgs() []any`**
   Converts extracted attributes to `[]any` for use with slog convenience methods like `Logger.Error`.
 
 ## Use Cases
