@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2026-01-31
 
-This release adds a new convenience function `ClassifyNew` to reduce verbosity when creating and classifying errors in a single step.
+This release adds a new convenience function `ClassifyNew` for creating and classifying errors in a single step.
 
 ### Added
 
-- **New `ClassifyNew()` function** - Added `ClassifyNew(text string, classifications ...Classified) error` function to create a new error and immediately classify it with one or more classifications. This convenience function reduces verbosity compared to the two-step approach:
+- **New `ClassifyNew()` function** - Added `ClassifyNew(text string, classifications ...Classified) error` function to create a new error and immediately classify it with one or more classifications. This convenience function makes the code more concise and readable:
   ```go
   // Before
   err := errx.Classify(errors.New("some error"), ErrNotFound, ErrDatabase)
@@ -19,7 +19,7 @@ This release adds a new convenience function `ClassifyNew` to reduce verbosity w
   // After
   err := errx.ClassifyNew("some error", ErrNotFound, ErrDatabase)
   ```
-  This saves 6+ characters per use and eliminates the need to import the `errors` package in many cases.
+  This also eliminates the need to import the `errors` package in many cases.
 
 - **compat.ClassifyNew()** - Added `compat.ClassifyNew(text string, classifications ...error) error` function that accepts standard Go `error` interface for classifications, maintaining compatibility with existing error types.
 
