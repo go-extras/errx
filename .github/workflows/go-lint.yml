@@ -14,12 +14,6 @@ jobs:
   golangci:
     name: lint
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version:
-          - oldstable
-          - stable
     steps:
       # Checkout code
       - name: Checkout code
@@ -27,7 +21,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: stable
           cache: true
           cache-dependency-path: go.sum
 
