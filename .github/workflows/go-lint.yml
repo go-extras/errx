@@ -19,12 +19,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - id: vars
-        uses: ./.github/actions/vars
-
       - uses: actions/setup-go@v6
         with:
-          go-version: ${{ steps.vars.outputs.go_version }}
+          go-version: stable
           cache: true
           cache-dependency-path: go.sum
 
@@ -40,7 +37,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           args: --timeout=30m
-          version: ${{ steps.vars.outputs.golangci_lint_version }}
+          version: v2.10.1
 
       - name: Run govulncheck
         run: |

@@ -376,7 +376,7 @@ func extractCarrierClassifications(err error) []errx.Classified {
 	}
 
 	v := reflect.ValueOf(err)
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 
@@ -432,7 +432,7 @@ func isCarrier(err error) bool {
 	}
 
 	v := reflect.ValueOf(err)
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 
