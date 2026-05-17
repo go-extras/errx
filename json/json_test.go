@@ -328,6 +328,61 @@ func TestWithMaxDepth(t *testing.T) {
 	}
 }
 
+func TestWithMaxDepth_ZeroUnlimited(t *testing.T) {
+	// WithMaxDepth(0) is treated as "unlimited", matching WithMaxStackFrames(0).
+	err := errors.New("level 5")
+	err = errx.Wrap("level 4", err)
+	err = errx.Wrap("level 3", err)
+	err = errx.Wrap("level 2", err)
+	err = errx.Wrap("level 1", err)
+
+	data, marshalErr := errxjson.Marshal(err, errxjson.WithMaxDepth(0))
+	if marshalErr != nil {
+		t.Fatalf("Marshal error: %v", marshalErr)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	depth := 1
+	current := &result
+	for current.Cause != nil {
+		if current.Message == "(max depth reached)" {
+			t.Fatal("Hit max depth with WithMaxDepth(0); expected unlimited traversal")
+		}
+		depth++
+		current = current.Cause
+	}
+	if depth != 5 {
+		t.Errorf("depth = %d, want 5", depth)
+	}
+	if current.Message == "(max depth reached)" {
+		t.Error("Hit max depth with WithMaxDepth(0); expected unlimited traversal")
+	}
+}
+
+func TestWithMaxDepth_NegativeUnlimited(t *testing.T) {
+	// Negative depth is also treated as "unlimited".
+	err := errors.New("inner")
+	err = errx.Wrap("outer", err)
+
+	data, marshalErr := errxjson.Marshal(err, errxjson.WithMaxDepth(-1))
+	if marshalErr != nil {
+		t.Fatalf("Marshal error: %v", marshalErr)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if result.Message == "(max depth reached)" {
+		t.Fatal("WithMaxDepth(-1) tripped depth limit; expected unlimited")
+	}
+}
+
 func TestWithMaxStackFrames(t *testing.T) {
 	testErr := stacktrace.Wrap("operation failed", errors.New("base error"))
 

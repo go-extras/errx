@@ -396,3 +396,29 @@ type simpleError string
 func (e simpleError) Error() string {
 	return string(e)
 }
+
+// CarrierClassifications returns the classification sentinels attached to err
+// if err is an internal carrier produced by Classify, ClassifyNew, or Wrap
+// (when called with one or more classifications).
+//
+// The second return value reports whether err is a carrier. It returns
+// (nil, false) when err is nil or is not a carrier.
+//
+// This helper is primarily intended for subpackages (such as the json
+// subpackage) that need to introspect the classifications attached at a
+// specific level of the error chain without traversing it via errors.Is.
+// It exists to avoid reflection or unsafe-pointer tricks against unexported
+// carrier internals.
+//
+// The returned slice aliases the carrier's internal storage; callers must
+// treat it as read-only.
+func CarrierClassifications(err error) ([]Classified, bool) {
+	if err == nil {
+		return nil, false
+	}
+	c, ok := err.(*carrier)
+	if !ok {
+		return nil, false
+	}
+	return c.classifications, true
+}

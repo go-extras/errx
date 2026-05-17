@@ -675,3 +675,98 @@ func TestCarrier_AsMethod_WithSentinel(t *testing.T) {
 		t.Errorf("expected 'tag', got %q", target.Error())
 	}
 }
+
+// TestCarrierClassifications_Nil verifies the helper returns (nil, false) for nil.
+func TestCarrierClassifications_Nil(t *testing.T) {
+	classifications, ok := errx.CarrierClassifications(nil)
+	if ok {
+		t.Error("expected ok=false for nil error")
+	}
+	if classifications != nil {
+		t.Errorf("expected nil classifications, got %v", classifications)
+	}
+}
+
+// TestCarrierClassifications_NonCarrier verifies the helper returns (nil, false)
+// for errors that are not internal carriers.
+func TestCarrierClassifications_NonCarrier(t *testing.T) {
+	stdErr := errors.New("standard error")
+	classifications, ok := errx.CarrierClassifications(stdErr)
+	if ok {
+		t.Error("expected ok=false for standard error")
+	}
+	if classifications != nil {
+		t.Errorf("expected nil classifications, got %v", classifications)
+	}
+
+	sentinel := errx.NewSentinel("sentinel")
+	classifications, ok = errx.CarrierClassifications(sentinel)
+	if ok {
+		t.Error("expected ok=false for sentinel error")
+	}
+	if classifications != nil {
+		t.Errorf("expected nil classifications, got %v", classifications)
+	}
+}
+
+// TestCarrierClassifications_Classify verifies that errors produced by Classify
+// are recognised as carriers and expose their classifications.
+func TestCarrierClassifications_Classify(t *testing.T) {
+	tag1 := errx.NewSentinel("tag1")
+	tag2 := errx.NewSentinel("tag2")
+	baseErr := errors.New("base error")
+
+	classified := errx.Classify(baseErr, tag1, tag2)
+	classifications, ok := errx.CarrierClassifications(classified)
+	if !ok {
+		t.Fatal("expected ok=true for classified error")
+	}
+	if len(classifications) != 2 {
+		t.Fatalf("expected 2 classifications, got %d", len(classifications))
+	}
+	if classifications[0].Error() != "tag1" {
+		t.Errorf("expected first classification 'tag1', got %q", classifications[0].Error())
+	}
+	if classifications[1].Error() != "tag2" {
+		t.Errorf("expected second classification 'tag2', got %q", classifications[1].Error())
+	}
+}
+
+// TestCarrierClassifications_ClassifyNew verifies ClassifyNew also produces a
+// carrier visible through the helper.
+func TestCarrierClassifications_ClassifyNew(t *testing.T) {
+	tag := errx.NewSentinel("tag")
+	err := errx.ClassifyNew("oops", tag)
+
+	classifications, ok := errx.CarrierClassifications(err)
+	if !ok {
+		t.Fatal("expected ok=true for ClassifyNew result")
+	}
+	if len(classifications) != 1 || classifications[0].Error() != "tag" {
+		t.Errorf("expected [tag], got %v", classifications)
+	}
+}
+
+// TestCarrierClassifications_WrappedCarrier confirms that the helper returns
+// (nil, false) when the carrier sits beneath an fmt.Errorf wrapper. Callers
+// must unwrap themselves before inspecting.
+func TestCarrierClassifications_WrappedCarrier(t *testing.T) {
+	tag := errx.NewSentinel("tag")
+	baseErr := errors.New("base error")
+	wrapped := errx.Wrap("context", baseErr, tag)
+
+	// Wrap returns an fmt.Errorf-style wrapper around the carrier.
+	if _, ok := errx.CarrierClassifications(wrapped); ok {
+		t.Error("expected ok=false for fmt.Errorf wrapper around carrier")
+	}
+
+	// Unwrapping once should expose the carrier.
+	inner := errors.Unwrap(wrapped)
+	classifications, ok := errx.CarrierClassifications(inner)
+	if !ok {
+		t.Fatal("expected ok=true for unwrapped carrier")
+	}
+	if len(classifications) != 1 || classifications[0].Error() != "tag" {
+		t.Errorf("expected [tag], got %v", classifications)
+	}
+}
