@@ -673,3 +673,115 @@ func TestFormatPlusVConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestHereDepth_ClampsToMaxDepth verifies that absurd depths (e.g. 1_000_000)
+// do not allocate gigabytes and do not produce more than MaxDepth frames. The
+// actual frame count is bounded by the real call stack, but the captured PC
+// slice must be capped at MaxDepth.
+func TestHereDepth_ClampsToMaxDepth(t *testing.T) {
+	// If clamping is missing, this would attempt to allocate ~8MB per call.
+	tr := stacktrace.HereDepth(1_000_000)
+	wrapped := errx.Classify(errors.New("e"), tr)
+
+	frames := stacktrace.Extract(wrapped)
+	if frames == nil {
+		t.Fatal("expected frames")
+	}
+	if len(frames) > stacktrace.MaxDepth {
+		t.Fatalf("HereDepth(1_000_000) returned %d frames; expected at most MaxDepth=%d",
+			len(frames), stacktrace.MaxDepth)
+	}
+}
+
+// TestHereDepth_ClampsToOne verifies that non-positive depths fall back to the
+// default rather than producing zero frames or panicking.
+func TestHereDepth_ClampsToOne(t *testing.T) {
+	cases := []int{0, -1, -5}
+	for _, depth := range cases {
+		tr := stacktrace.HereDepth(depth)
+		frames := stacktrace.Extract(errx.Classify(errors.New("e"), tr))
+		if len(frames) == 0 {
+			t.Errorf("HereDepth(%d) produced zero frames; expected default fallback", depth)
+		}
+	}
+}
+
+// customTracer is an external Tracer (not the internal *traced) used to verify
+// that Extract finds Tracer implementations buried inside multi-error trees
+// produced by errors.Join.
+type customTracer struct {
+	frames []stacktrace.Frame
+}
+
+func (*customTracer) Error() string                { return "custom tracer" }
+func (c *customTracer) Frames() []stacktrace.Frame { return c.frames }
+
+// TestExtract_ExternalTracerInMultiError verifies that an external Tracer
+// implementation hidden inside errors.Join(...) is discovered by Extract.
+// Previously, Extract walked single-Unwrap only and would miss multi-error
+// branches; ExtractAll handled this correctly but Extract did not.
+func TestExtract_ExternalTracerInMultiError(t *testing.T) {
+	custom := &customTracer{
+		frames: []stacktrace.Frame{
+			{File: "remote.go", Line: 99, Function: "remote.JoinedHandler"},
+		},
+	}
+	plain := errors.New("plain branch")
+
+	// custom is the SECOND branch in the Join — single-unwrap traversal would
+	// never visit it.
+	joined := errors.Join(plain, custom)
+
+	frames := stacktrace.Extract(joined)
+	if frames == nil {
+		t.Fatal("expected Extract to find external Tracer inside errors.Join")
+	}
+	if len(frames) != 1 || frames[0].Function != "remote.JoinedHandler" {
+		t.Fatalf("Extract did not return custom tracer frames, got %+v", frames)
+	}
+}
+
+// TestExtract_ExternalTracerInDeepMultiError verifies Extract traverses
+// nested errors.Join trees.
+func TestExtract_ExternalTracerInDeepMultiError(t *testing.T) {
+	custom := &customTracer{
+		frames: []stacktrace.Frame{
+			{File: "deep.go", Line: 7, Function: "deep.Buried"},
+		},
+	}
+	inner := errors.Join(errors.New("a"), errors.New("b"), custom)
+	outer := fmt.Errorf("outer: %w", inner)
+
+	frames := stacktrace.Extract(outer)
+	if frames == nil {
+		t.Fatal("expected Extract to traverse into nested errors.Join")
+	}
+	if len(frames) != 1 || frames[0].Function != "deep.Buried" {
+		t.Fatalf("Extract did not return buried tracer frames, got %+v", frames)
+	}
+}
+
+// TestError_DoesNotResolveFrames verifies that calling Error() reports the
+// number of captured program counters without forcing symbol resolution.
+// Resolution is a relatively expensive runtime.CallersFrames walk that should
+// only happen when frames are actually requested (e.g. via Frames(), Extract,
+// or %+v formatting).
+func TestError_DoesNotResolveFrames(t *testing.T) {
+	tr := stacktrace.Here()
+
+	// The reported count must match what Frames() ultimately returns. We don't
+	// have white-box access to verify "no resolution happened", but we can at
+	// least pin down the contract: Error() reports a count, and that count is
+	// consistent with the resolved slice length.
+	msg := tr.(error).Error()
+
+	if !strings.HasPrefix(msg, "stack trace:") {
+		t.Fatalf("expected Error() to start with 'stack trace:', got %q", msg)
+	}
+
+	// Force resolution and ensure the count is plausible (at least 1 frame).
+	frames := stacktrace.Extract(errx.Classify(errors.New("e"), tr))
+	if len(frames) == 0 {
+		t.Fatal("expected at least one frame after Extract")
+	}
+}

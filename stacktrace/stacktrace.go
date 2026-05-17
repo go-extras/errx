@@ -44,6 +44,15 @@ import (
 // to capture deeper traces.
 const DefaultMaxDepth = 32
 
+// MaxDepth is the absolute ceiling on the number of stack frames captured by
+// any of the *Depth variants (HereDepth, WrapDepth, ClassifyDepth,
+// ClassifyNewDepth). Caller-supplied depths are clamped to this value to bound
+// per-call allocation: each frame slot is one uintptr (8 bytes on 64-bit), so
+// a stray HereDepth(1_000_000) would otherwise burn ~8MB on every call.
+// 256 is generous in practice and matches the upper end of frame counts used
+// by mature tracing libraries.
+const MaxDepth = 256
+
 // Frame represents a single stack frame with file, line, and function information.
 type Frame struct {
 	File     string // Full path to the source file
@@ -74,17 +83,21 @@ type traced struct {
 
 // Error returns a string representation of the traced error.
 // This is primarily for debugging; the trace itself is accessed via Extract().
+// It deliberately reports the frame count via len(t.pcs) rather than resolving
+// symbols, so that simply printing an error does not force the (relatively
+// expensive) runtime.CallersFrames walk.
 func (t *traced) Error() string {
-	frames := t.frames()
-	if len(frames) == 0 {
+	if len(t.pcs) == 0 {
 		return "(empty stack trace)"
 	}
-	return fmt.Sprintf("stack trace: %d frames", len(frames))
+	return fmt.Sprintf("stack trace: %d frames", len(t.pcs))
 }
 
 // Format implements fmt.Formatter. The "%+v" verb renders the captured stack
 // trace in the de-facto pkg/errors style (one frame per line, function then
-// "\tfile:line"). The "%v" and "%s" verbs fall back to Error().
+// "\tfile:line"). The "%v" and "%s" verbs fall back to Error(). Unknown verbs
+// produce a "%!<verb>(stacktrace.traced=...)" marker, mirroring stdlib
+// behaviour for misuse.
 func (t *traced) Format(s fmt.State, verb rune) {
 	switch verb {
 	case 'v':
@@ -99,6 +112,8 @@ func (t *traced) Format(s fmt.State, verb rune) {
 		_, _ = io.WriteString(s, t.Error())
 	case 'q':
 		_, _ = fmt.Fprintf(s, "%q", t.Error())
+	default:
+		_, _ = fmt.Fprintf(s, "%%!%c(stacktrace.traced=%s)", verb, t.Error())
 	}
 }
 
@@ -159,8 +174,9 @@ func Here() errx.Classified {
 }
 
 // HereDepth is like Here but allows the caller to specify the maximum number of
-// stack frames to capture. depth must be positive; non-positive values fall back
-// to DefaultMaxDepth.
+// stack frames to capture. Non-positive values fall back to DefaultMaxDepth.
+// Values larger than MaxDepth are clamped to MaxDepth to bound allocation, so
+// HereDepth(1_000_000) is safe and equivalent to HereDepth(MaxDepth).
 //
 // Example:
 //
@@ -172,10 +188,14 @@ func HereDepth(depth int) errx.Classified {
 // captureStack captures the current stack trace with the specified skip count.
 // skip indicates how many stack frames to skip (0 = captureStack itself).
 // depth is the maximum number of frames to capture; non-positive values use
-// DefaultMaxDepth.
+// DefaultMaxDepth, and values above MaxDepth are clamped to MaxDepth so that
+// caller-supplied bounds cannot trigger unbounded allocation.
 func captureStack(skip, depth int) *traced {
 	if depth <= 0 {
 		depth = DefaultMaxDepth
+	}
+	if depth > MaxDepth {
+		depth = MaxDepth
 	}
 	pcs := make([]uintptr, depth)
 	n := runtime.Callers(skip+1, pcs) // +1 to skip captureStack itself
@@ -187,8 +207,10 @@ func captureStack(skip, depth int) *traced {
 }
 
 // Extract returns stack frames from the first traced error found in the error chain.
-// It traverses the entire error chain looking for a traced error and returns its frames.
-// Third-party errors that implement Tracer also participate.
+// It traverses the entire error chain (including multi-error branches produced
+// by errors.Join) looking for a traced error or a third-party Tracer
+// implementation and returns its frames. The outermost trace wins, matching
+// pkg/errors semantics.
 //
 // Returns nil if the error is nil or does not contain any stack trace.
 //
@@ -201,27 +223,16 @@ func captureStack(skip, depth int) *traced {
 //	    }
 //	}
 func Extract(err error) []Frame {
-	if err == nil {
+	// Delegate to ExtractAll so that multi-error branches (errors.Join) are
+	// traversed identically. ExtractAll preserves outermost-first ordering, so
+	// the first element is the trace Extract historically returned for
+	// single-unwrap chains, plus we now also discover external Tracer
+	// implementations hidden inside Join'd trees.
+	all := ExtractAll(err)
+	if len(all) == 0 {
 		return nil
 	}
-
-	// Walk the chain manually so we can also recognise Tracer implementations
-	// that are not the internal *traced type. This keeps backwards-compatible
-	// behaviour (outermost trace wins) while supporting third-party tracers.
-	for current := err; current != nil; current = errors.Unwrap(current) {
-		if frames := tracerFrames(current); frames != nil {
-			return frames
-		}
-	}
-
-	// Fall back to errors.As to handle any wrappers that report a *traced via
-	// As without participating in the standard Unwrap chain.
-	var t *traced
-	if errors.As(err, &t) {
-		return t.frames()
-	}
-
-	return nil
+	return all[0]
 }
 
 // ExtractAll returns every stack trace found in the error chain, ordered from
@@ -384,17 +395,6 @@ func extractCarrierClassifications(err error) []errx.Classified {
 	return result
 }
 
-// tracerFrames returns the frames of err if it is a *traced or implements Tracer.
-func tracerFrames(err error) []Frame {
-	if t, ok := err.(*traced); ok {
-		return t.frames()
-	}
-	if t, ok := err.(Tracer); ok {
-		return t.Frames()
-	}
-	return nil
-}
-
 // Wrap wraps an error with additional context text and optional classifications,
 // automatically capturing a stack trace at the call site.
 //
@@ -418,8 +418,8 @@ func Wrap(text string, cause error, classifications ...errx.Classified) error {
 }
 
 // WrapDepth is like Wrap but allows the caller to specify the maximum number of
-// stack frames to capture. depth must be positive; non-positive values fall
-// back to DefaultMaxDepth.
+// stack frames to capture. Non-positive values fall back to DefaultMaxDepth,
+// and values larger than MaxDepth are clamped to MaxDepth.
 func WrapDepth(text string, cause error, depth int, classifications ...errx.Classified) error {
 	if cause == nil {
 		return nil
@@ -452,7 +452,8 @@ func Classify(cause error, classifications ...errx.Classified) error {
 }
 
 // ClassifyDepth is like Classify but allows the caller to specify the maximum
-// number of stack frames to capture.
+// number of stack frames to capture. Non-positive values fall back to
+// DefaultMaxDepth, and values larger than MaxDepth are clamped to MaxDepth.
 func ClassifyDepth(cause error, depth int, classifications ...errx.Classified) error {
 	if cause == nil {
 		return nil
@@ -494,7 +495,8 @@ func ClassifyNew(text string, classifications ...errx.Classified) error {
 }
 
 // ClassifyNewDepth is like ClassifyNew but allows the caller to specify the
-// maximum number of stack frames to capture.
+// maximum number of stack frames to capture. Non-positive values fall back to
+// DefaultMaxDepth, and values larger than MaxDepth are clamped to MaxDepth.
 func ClassifyNewDepth(text string, depth int, classifications ...errx.Classified) error {
 	trace := captureStack(2, depth)
 	classifications = append(classifications, trace)
