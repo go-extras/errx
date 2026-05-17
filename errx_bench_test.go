@@ -304,35 +304,38 @@ func BenchmarkExtractAttrs_Deep(b *testing.B) {
 	}
 }
 
-// Benchmark combined operations (realistic scenarios)
+// Benchmark combined operations (realistic scenarios). The base errors are
+// constructed BEFORE b.ResetTimer() so the per-iteration cost reported is only
+// the errx work being measured (not errors.New).
+
 func BenchmarkCombined_SimpleClassification(b *testing.B) {
 	ErrNotFound := errx.NewSentinel("not found")
+	baseErr := errors.New("record not found")
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		err := errors.New("record not found")
-		err = errx.Classify(err, ErrNotFound)
+		err := errx.Classify(baseErr, ErrNotFound)
 		_ = errors.Is(err, ErrNotFound)
 	}
 }
 
 func BenchmarkCombined_WrapWithClassification(b *testing.B) {
 	ErrDatabase := errx.NewSentinel("database")
+	baseErr := errors.New("connection failed")
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		err := errors.New("connection failed")
-		err = errx.Wrap("query failed", err, ErrDatabase)
+		err := errx.Wrap("query failed", baseErr, ErrDatabase)
 		_ = errors.Is(err, ErrDatabase)
 	}
 }
 
 func BenchmarkCombined_RichError(b *testing.B) {
 	ErrValidation := errx.NewSentinel("validation")
+	baseErr := errors.New("invalid input")
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		baseErr := errors.New("invalid input")
 		displayErr := errx.NewDisplayable("Please provide valid input")
 		attrErr := errx.Attrs("field", "email", "value", "invalid@")
 		err := errx.Classify(baseErr, displayErr, attrErr, ErrValidation)
@@ -344,18 +347,24 @@ func BenchmarkCombined_RichError(b *testing.B) {
 	}
 }
 
+// BenchmarkCombined_ErrorChain measures classify+wrap+fmt.Errorf across a
+// parameterised chain depth so we can spot per-level cost regressions.
 func BenchmarkCombined_ErrorChain(b *testing.B) {
 	ErrNotFound := errx.NewSentinel("not found")
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		err := errors.New("record missing")
-		err = errx.Classify(err, ErrNotFound)
-		err = errx.Wrap("database query failed", err)
-		err = fmt.Errorf("handler error: %w", err)
-		err = fmt.Errorf("request failed: %w", err)
+	baseErr := errors.New("record missing")
 
-		_ = errors.Is(err, ErrNotFound)
+	for _, depth := range []int{1, 4, 16, 64} {
+		b.Run(fmt.Sprintf("depth=%d", depth), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				err := errx.Classify(baseErr, ErrNotFound)
+				err = errx.Wrap("database query failed", err)
+				for j := 0; j < depth; j++ {
+					err = fmt.Errorf("layer %d: %w", j, err)
+				}
+				_ = errors.Is(err, ErrNotFound)
+			}
+		})
 	}
 }
 

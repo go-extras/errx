@@ -2,7 +2,7 @@
 
 Rich error handling with classification tags, displayable messages, and structured attributes for Go
 
-[![CI](https://github.com/go-extras/errx/actions/workflows/go-test.yml/badge.svg?branch=master)](https://github.com/go-extras/errx/actions/workflows/go-test.yml)
+[![CI](https://github.com/go-extras/errx/actions/workflows/go-test.yml/badge.svg)](https://github.com/go-extras/errx/actions/workflows/go-test.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-extras/errx.svg)](https://pkg.go.dev/github.com/go-extras/errx)
 [![Go Report Card](https://goreportcard.com/badge/github.com/go-extras/errx)](https://goreportcard.com/report/github.com/go-extras/errx)
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.25-00ADD8?logo=go)](https://go.dev/dl/)
@@ -39,7 +39,13 @@ The library is designed for developers building production systems that need sop
 
 ## Requirements
 
-- Go 1.25+ (tested on 1.25.x)
+- Go 1.25+ (tracks the two most recent stable Go releases per the Go team's support policy)
+
+### Version Compatibility
+
+`errx` follows the [Go team's release policy](https://go.dev/doc/devel/release) and officially supports the two most recent stable Go releases. CI verifies the library on both the current `stable` and `oldstable` toolchains; older versions may work but are not tested.
+
+The `go` directive in `go.mod` declares the minimum language version required to build the module (currently `1.25`). The supported range is bumped when a new Go release ships, dropping the oldest then-unsupported version.
 
 ## Installation
 
@@ -91,6 +97,18 @@ func main() {
     // Full error for logging
     fmt.Println("Full error:", err)
 }
+```
+
+For the common case of creating a brand new error and classifying it in one step, use `ClassifyNew`:
+
+```go
+var (
+    ErrNotFound = errx.NewSentinel("resource not found")
+    ErrDatabase = errx.NewSentinel("database error")
+)
+
+err := errx.ClassifyNew("user record missing", ErrNotFound, ErrDatabase)
+// equivalent to: errx.Classify(errors.New("user record missing"), ErrNotFound, ErrDatabase)
 ```
 
 ## Core Concepts
@@ -322,6 +340,9 @@ err := errx.Wrap("operation failed", cause, ErrNotFound, stacktrace.Here())
 // Option 2: Automatic capture with stacktrace.Wrap()
 err := stacktrace.Wrap("operation failed", cause, ErrNotFound)
 
+// Option 3: Create + classify + capture stack in one call
+err := stacktrace.ClassifyNew("user record missing", ErrNotFound)
+
 // Extract and use stack traces
 frames := stacktrace.Extract(err)
 if frames != nil {
@@ -416,6 +437,9 @@ func fetchUser(id string) error {
 if errors.Is(err, ErrNotFound) {
     // Handle not found case
 }
+
+// One-step create + classify with standard errors
+err := compat.ClassifyNew("user record missing", ErrNotFound, ErrDatabase)
 ```
 
 **Key features:**
@@ -677,27 +701,32 @@ Full API documentation is available at [pkg.go.dev/github.com/go-extras/errx](ht
 
 ### Core Functions
 
+Signatures below mirror the Go source. The core package uses the type-safe `Classified` interface for sentinels and classifications; see the [`compat` subpackage](#standard-error-compatibility-compat-package) when you need to pass plain `error` values instead.
+
 #### Error Creation
 
-- **`NewSentinel(message string, parents ...error) error`**
-  Creates a new sentinel error for classification. Supports hierarchical error taxonomies.
+- **`NewSentinel(text string, parents ...Classified) Classified`**
+  Creates a new sentinel for classification. Supports hierarchical error taxonomies via optional parent sentinels.
 
-- **`NewDisplayable(message string) error`**
+- **`NewDisplayable(message string) Classified`**
   Creates a user-safe displayable error message.
 
-- **`Attrs(keyvals ...any) error`**
-  Creates an error with structured key-value attributes.
+- **`Attrs(attrs ...any) Classified`**
+  Creates an error with structured key-value attributes. Accepts alternating key/value pairs, `Attr` structs, or `[]Attr`/`AttrList` slices.
 
-- **`FromAttrMap(attrs AttrMap) error`**
-  Creates an attributed error from a map of key-value pairs.
+- **`FromAttrMap(attrs AttrMap) Classified`**
+  Creates an attributed error from a map of key-value pairs. Attribute ordering is non-deterministic.
 
 #### Error Wrapping
 
-- **`Wrap(message string, err error, sentinels ...error) error`**
-  Wraps an error with context and optional classification sentinels.
+- **`Wrap(text string, cause error, classifications ...Classified) error`**
+  Wraps an error with context text and optional classifications. Returns `nil` if `cause` is `nil`.
 
-- **`Classify(err error, sentinels ...error) error`**
-  Adds classification to an error without adding context to the message.
+- **`Classify(cause error, classifications ...Classified) error`**
+  Attaches one or more classifications to an existing error without adding context text. Returns `nil` if `cause` is `nil`.
+
+- **`ClassifyNew(text string, classifications ...Classified) error`**
+  Creates a new error with the given text and immediately classifies it. Equivalent to `errx.Classify(errors.New(text), classifications...)` but more concise.
 
 #### Error Inspection
 

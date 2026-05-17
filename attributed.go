@@ -311,14 +311,59 @@ func (*attributed) IsClassified() bool {
 }
 
 // HasAttrs checks if an error contains structured attributes.
-// It returns true if the error or any wrapped error is an attributed error.
+// It returns true if the error chain contains at least one attributed error
+// with a non-empty attribute list. An empty attributed error (e.g. from
+// Attrs() with no arguments or FromAttrMap(nil)) does not count, so this
+// stays consistent with ExtractAttrs which returns nil for those cases.
+//
+// The walk short-circuits on the first non-empty find for performance.
 func HasAttrs(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	var aErr *attributed
-	return errors.As(err, &aErr)
+	visited := make(map[uintptr]bool)
+	queue := []error{err}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		if current == nil {
+			continue
+		}
+
+		ptr := errptr.Get(current)
+		if ptr != 0 {
+			if visited[ptr] {
+				continue
+			}
+			visited[ptr] = true
+		}
+
+		if aErr, ok := current.(*attributed); ok {
+			if len(aErr.attrs) > 0 {
+				return true
+			}
+		}
+
+		if c, ok := current.(*carrier); ok {
+			for _, cls := range c.classifications {
+				queue = append(queue, cls)
+			}
+		}
+
+		type unwrapper interface {
+			Unwrap() []error
+		}
+		if u, ok := current.(unwrapper); ok {
+			queue = append(queue, u.Unwrap()...)
+		} else if next := errors.Unwrap(current); next != nil {
+			queue = append(queue, next)
+		}
+	}
+
+	return false
 }
 
 // ExtractAttrs extracts and merges all structured attributes from an error chain.

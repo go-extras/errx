@@ -23,6 +23,7 @@ package json
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 
 	"github.com/go-extras/errx"
@@ -124,8 +125,7 @@ func Marshal(err error, opts ...Option) ([]byte, error) {
 		opt(cfg)
 	}
 
-	visited := make(map[uintptr]bool)
-	serialized := toSerializedError(err, cfg, visited, 0)
+	serialized := toSerializedError(err, cfg, newVisited(), 0)
 	return json.Marshal(serialized)
 }
 
@@ -145,8 +145,7 @@ func MarshalIndent(err error, prefix, indent string, opts ...Option) ([]byte, er
 		opt(cfg)
 	}
 
-	visited := make(map[uintptr]bool)
-	serialized := toSerializedError(err, cfg, visited, 0)
+	serialized := toSerializedError(err, cfg, newVisited(), 0)
 	return json.MarshalIndent(serialized, prefix, indent)
 }
 
@@ -169,66 +168,156 @@ func ToSerializedError(err error, opts ...Option) *SerializedError {
 		opt(cfg)
 	}
 
-	visited := make(map[uintptr]bool)
-	return toSerializedError(err, cfg, visited, 0)
+	return toSerializedError(err, cfg, newVisited(), 0)
 }
 
+// visitedSet tracks errors visited along the current recursion path.
+// It is scoped per-path (not per-branch): entries are added on entry to
+// toSerializedError and removed on exit, so true cycles on a single descent
+// are still detected, while siblings of a DAG do not poison each other.
+type visitedSet map[uintptr]bool
+
+func newVisited() visitedSet { return make(visitedSet) }
+
 // toSerializedError recursively converts an error to SerializedError.
-func toSerializedError(err error, cfg *config, visited map[uintptr]bool, depth int) *SerializedError {
+//
+// At entry, it peels leading carriers so the "node" at this level is the
+// first non-carrier in the chain. This avoids emitting the duplicate cause
+// that errx.Classify and nested Classify previously produced. After the
+// node, it absorbs at most one immediately-following carrier (the one
+// errx.Wrap inserted alongside the fmt-wrap), so each Wrap level surfaces
+// only its own classifications and deeper-level sentinels never leak up.
+func toSerializedError(err error, cfg *config, visited visitedSet, depth int) *SerializedError {
 	if err == nil {
 		return nil
 	}
 
-	// Check depth limit
+	// Check depth limit.
 	if depth >= cfg.maxDepth {
 		return &SerializedError{
 			Message: "(max depth reached)",
 		}
 	}
 
-	// Check for circular references
-	if err != nil {
-		ptr := errptr.Get(err)
+	node, levelCls, nextCause := peelLevel(err)
+
+	// Per-path cycle detection. Pop on exit so DAGs serialize fully.
+	ptr := errptr.Get(node)
+	if ptr != 0 {
 		if visited[ptr] {
-			return &SerializedError{
-				Message: "(circular reference)",
-			}
+			return &SerializedError{Message: "(circular reference)"}
 		}
 		visited[ptr] = true
+		defer delete(visited, ptr)
 	}
 
 	result := &SerializedError{
-		Message: truncateMessage(err.Error(), cfg.maxMessageBytes),
+		Message: truncateMessage(node.Error(), cfg.maxMessageBytes),
 	}
 
-	// Extract displayable text
+	// For the chain-wide extractors we pass the original err (rather than
+	// the peeled node) so any classifications absorbed by this level (such
+	// as a displayable/attributed/stacktrace classification attached via
+	// errx.Classify or errx.Wrap) remain visible — they live in the
+	// carrier's classifications slice, which errors.As only reaches via
+	// the carrier's own As method.
+
+	// Displayable: chain-wide (errors.As walks the error chain).
 	if errx.IsDisplayable(err) {
 		result.DisplayText = errx.DisplayText(err)
 	}
 
-	// Extract sentinels - only from this error level, not the whole chain
+	// Sentinels: level-scoped. Only this level's absorbed carrier
+	// classifications and the node itself (if it's a pure sentinel) count.
 	if cfg.includeSentinels {
-		result.Sentinels = extractSentinelsFromError(err)
+		result.Sentinels = sentinelsForLevel(levelCls, node)
 	}
 
-	// Extract attributes
+	// Attributes: chain-wide (errx.ExtractAttrs walks the chain).
+	// Per-value JSON-serializability is validated to keep one bad value
+	// from aborting the whole marshal.
 	if cfg.includeAttributes {
 		serializeAttributes(err, cfg, result)
 	}
 
-	// Extract stack trace
+	// Stack trace: chain-wide.
 	if cfg.includeStackTrace {
 		serializeStackTrace(err, cfg, result)
 	}
 
-	// Handle unwrapping
-	serializeCauses(err, cfg, visited, depth, result)
+	// Cause(s).
+	serializeCauses(node, nextCause, cfg, visited, depth, result)
 
 	return result
 }
 
-// serializeAttributes extracts and serializes attributes from an error,
-// applying the configured attribute value transformer (if any).
+// peelLevel walks from err and returns the message-bearing node for this
+// level, the classifications that belong to this level, and the cause to
+// recurse into.
+//
+//   - When err itself is a carrier (top-level Classify, or recursion landing
+//     on a carrier), all consecutive leading carriers are absorbed into this
+//     level. The node is the first non-carrier; the next cause is its raw
+//     Unwrap (no further absorption — that belongs to the next level). This
+//     collapses redundant nested Classify levels without losing
+//     classifications.
+//
+//   - When err is not a carrier, the node is err itself and exactly one
+//     immediately-following carrier is absorbed (this is the carrier inserted
+//     by the same errx.Wrap call as the fmt-wrap). Subsequent carriers
+//     belong to a deeper level and are passed through as nextCause.
+func peelLevel(err error) (node error, classifications []errx.Classified, nextCause error) {
+	cur := err
+
+	if isCarrier(cur) {
+		// Classify-shaped entry: absorb all consecutive leading carriers.
+		for isCarrier(cur) {
+			classifications = append(classifications, extractCarrierClassifications(cur)...)
+			next := errors.Unwrap(cur)
+			if next == nil {
+				// Carrier with a nil cause shouldn't happen in normal use,
+				// but be defensive: treat the carrier itself as the node.
+				return cur, classifications, nil
+			}
+			cur = next
+		}
+		node = cur
+		nextCause = errors.Unwrap(node)
+		return node, classifications, nextCause
+	}
+
+	// Wrap-shaped entry (or plain error): node is err, absorb at most one
+	// immediate carrier behind it.
+	node = cur
+	nextCause = errors.Unwrap(node)
+	if isCarrier(nextCause) {
+		classifications = append(classifications, extractCarrierClassifications(nextCause)...)
+		nextCause = errors.Unwrap(nextCause)
+	}
+	return node, classifications, nextCause
+}
+
+// sentinelsForLevel returns the pure-sentinel texts attributable to this
+// level only. It examines the carrier classifications absorbed for this
+// level and, if the node itself is a pure sentinel, includes it. Sentinels
+// from deeper levels are intentionally not included here so they do not
+// leak across error levels.
+func sentinelsForLevel(classifications []errx.Classified, node error) []string {
+	var sentinels []string
+	seen := make(map[string]bool)
+
+	addPureSentinels(classifications, &sentinels, seen)
+	addSelfAsPureSentinel(node, &sentinels, seen)
+
+	return sentinels
+}
+
+// serializeAttributes extracts and serializes attributes from an error.
+// Attribute values whose JSON encoding fails (e.g. a func() value) are
+// replaced with a fmt.Sprintf("%+v", v) fallback string so a single bad
+// value does not abort the entire marshal. If a non-nil
+// AttributeValueTransformer is configured, it is applied to each value
+// before the JSON-serializability check.
 func serializeAttributes(err error, cfg *config, result *SerializedError) {
 	attrs := errx.ExtractAttrs(err)
 	if len(attrs) == 0 {
@@ -240,11 +329,25 @@ func serializeAttributes(err error, cfg *config, result *SerializedError) {
 		if cfg.attributeValueTransformer != nil {
 			value = cfg.attributeValueTransformer(attr.Key, value)
 		}
+		if !isJSONSerializable(value) {
+			value = fmt.Sprintf("%+v", value)
+		}
 		result.Attributes[i] = SerializedAttr{
 			Key:   attr.Key,
 			Value: value,
 		}
 	}
+}
+
+// isJSONSerializable reports whether v can be encoded by encoding/json
+// without producing an error. nil is treated as serializable (becomes
+// JSON null).
+func isJSONSerializable(v any) bool {
+	if v == nil {
+		return true
+	}
+	_, err := json.Marshal(v)
+	return err == nil
 }
 
 // serializeStackTrace extracts and serializes stack frames from an error.
@@ -268,22 +371,30 @@ func serializeStackTrace(err error, cfg *config, result *SerializedError) {
 }
 
 // serializeCauses handles unwrapping and serialization of error causes.
-func serializeCauses(err error, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
-	// Check for multi-error first
-	type unwrapper interface {
-		Unwrap() []error
-	}
-	if u, ok := err.(unwrapper); ok {
+// nextCause is the already-peeled single cause from peelLevel (carriers
+// stripped off where appropriate). Multi-error unwrap is handled on the
+// node itself, not via nextCause.
+func serializeCauses(node, nextCause error, cfg *config, visited visitedSet, depth int, result *SerializedError) {
+	// Multi-error path.
+	if u, ok := node.(unwrapper); ok {
 		serializeMultiError(u, cfg, visited, depth, result)
 		return
 	}
 
-	// Handle single unwrap
-	serializeSingleCause(err, cfg, visited, depth, result)
+	// Single-cause path (carrier already peeled by peelLevel).
+	if nextCause == nil {
+		return
+	}
+	if !cfg.includeStandardErrors && !isErrxError(nextCause) {
+		return
+	}
+	result.Cause = toSerializedError(nextCause, cfg, visited, depth+1)
 }
 
-// serializeMultiError serializes multiple error causes.
-func serializeMultiError(u unwrapper, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
+// serializeMultiError serializes multiple error causes. Each branch gets a
+// fresh copy of the visited set so a pointer that appears in a sibling
+// branch is not mistakenly flagged as a cycle.
+func serializeMultiError(u unwrapper, cfg *config, visited visitedSet, depth int, result *SerializedError) {
 	unwrapped := u.Unwrap()
 	if len(unwrapped) == 0 {
 		return
@@ -293,65 +404,27 @@ func serializeMultiError(u unwrapper, cfg *config, visited map[uintptr]bool, dep
 		if ue == nil || (!cfg.includeStandardErrors && !isErrxError(ue)) {
 			continue
 		}
-		serialized := toSerializedError(ue, cfg, visited, depth+1)
+		branchVisited := copyVisited(visited)
+		serialized := toSerializedError(ue, cfg, branchVisited, depth+1)
 		if serialized != nil {
 			result.Causes = append(result.Causes, serialized)
 		}
 	}
 }
 
+// copyVisited returns a shallow copy of the visited set for use as the
+// independent path tracker of a new branch.
+func copyVisited(v visitedSet) visitedSet {
+	cp := make(visitedSet, len(v))
+	for k := range v {
+		cp[k] = true
+	}
+	return cp
+}
+
 // unwrapper is the multi-error unwrap interface.
 type unwrapper interface {
 	Unwrap() []error
-}
-
-// serializeSingleCause serializes a single error cause.
-func serializeSingleCause(err error, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
-	cause := errors.Unwrap(err)
-	if cause == nil {
-		return
-	}
-
-	// If the cause is a carrier, skip it and go to its inner cause
-	if isCarrier(cause) {
-		// Add the carrier to visited to prevent infinite loops
-		if cause != nil {
-			ptr := errptr.Get(cause)
-			visited[ptr] = true
-		}
-		innerCause := errors.Unwrap(cause)
-		if innerCause != nil && (cfg.includeStandardErrors || isErrxError(innerCause)) {
-			result.Cause = toSerializedError(innerCause, cfg, visited, depth+1)
-		}
-		return
-	}
-
-	if cfg.includeStandardErrors || isErrxError(cause) {
-		result.Cause = toSerializedError(cause, cfg, visited, depth+1)
-	}
-}
-
-// extractSentinelsFromError extracts sentinel texts from the error and its immediate cause if it's a carrier.
-func extractSentinelsFromError(err error) []string {
-	if err == nil {
-		return nil
-	}
-
-	var sentinels []string
-	seenSentinels := make(map[string]bool)
-
-	// Check if err itself is a carrier and extract its classifications
-	carrierClassifications := extractCarrierClassifications(err)
-	addPureSentinels(carrierClassifications, &sentinels, seenSentinels)
-
-	// Also check causes if they're carriers (common pattern from Wrap and stacktrace.Wrap)
-	// Look up to 2 levels deep to handle nested carriers
-	extractFromCarrierCauses(err, &sentinels, seenSentinels)
-
-	// Also check if err itself is a pure sentinel
-	addSelfAsPureSentinel(err, &sentinels, seenSentinels)
-
-	return sentinels
 }
 
 // addPureSentinels adds pure sentinel classifications to the sentinels list.
@@ -370,20 +443,6 @@ func addPureSentinels(classifications []errx.Classified, sentinels *[]string, se
 // isPureSentinel checks if a classified error is a pure sentinel.
 func isPureSentinel(cls errx.Classified) bool {
 	return !errx.IsDisplayable(cls) && !errx.HasAttrs(cls) && stacktrace.Extract(cls) == nil
-}
-
-// extractFromCarrierCauses extracts sentinels from carrier causes up to 2 levels deep.
-func extractFromCarrierCauses(err error, sentinels *[]string, seen map[string]bool) {
-	current := err
-	for i := 0; i < 2; i++ {
-		cause := errors.Unwrap(current)
-		if cause == nil || !isCarrier(cause) {
-			break
-		}
-		carrierClassifications := extractCarrierClassifications(cause)
-		addPureSentinels(carrierClassifications, sentinels, seen)
-		current = cause
-	}
 }
 
 // addSelfAsPureSentinel checks if the error itself is a pure sentinel and adds it.

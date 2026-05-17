@@ -62,5 +62,14 @@ func Get(err error) uintptr {
 		typ  unsafe.Pointer
 		data unsafe.Pointer
 	}
-	return uintptr((*iface)(unsafe.Pointer(&err)).data)
+	p := (*iface)(unsafe.Pointer(&err))
+	// Typed-nil errors (e.g. `var p *MyErr; var e error = p`) have a non-nil
+	// type pointer but a nil data pointer. They do not have a trackable
+	// identity, so we treat them the same as a nil error (return 0). Callers
+	// already special-case 0 as "skip" for visited-set tracking, which avoids
+	// collisions between multiple typed-nil values in the same error chain.
+	if p.data == nil {
+		return 0
+	}
+	return uintptr(p.data)
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/go-extras/errx"
 )
@@ -454,7 +456,10 @@ func Example_apiHandlerWithDefault() {
 	// internal error: An unexpected error occurred
 }
 
-// ExampleAttrList_ToSlogAttrs demonstrates converting errx.AttrList to slog.Attr for use with LogAttrs
+// ExampleAttrList_ToSlogAttrs demonstrates converting errx.AttrList to slog.Attr
+// for use with LogAttrs. The expected output is rendered via a small in-test
+// handler we control so the example does not depend on the stdlib
+// slog.TextHandler format (which may shift between Go versions).
 func ExampleAttrList_ToSlogAttrs() {
 	// Create an error with attributes
 	err := errx.Attrs("user_id", 123, "action", "delete", "resource", "account")
@@ -466,25 +471,20 @@ func ExampleAttrList_ToSlogAttrs() {
 	// Convert to slog.Attr for use with LogAttrs (most efficient)
 	slogAttrs := attrs.ToSlogAttrs()
 
-	// Use with slog logger's LogAttrs method
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Remove time for consistent output
-			if a.Key == slog.TimeKey {
-				return slog.Attr{}
-			}
-			return a
-		},
-	}))
+	// Use with slog logger backed by an example-controlled handler so the
+	// // Output: assertion below stays stable across Go versions.
+	logger := slog.New(newExampleHandler(os.Stdout))
 
 	// LogAttrs accepts ...slog.Attr directly
 	logger.LogAttrs(context.Background(), slog.LevelError, "operation failed", slogAttrs...)
 
 	// Output:
-	// level=ERROR msg="operation failed" user_id=123 action=delete resource=account
+	// ERROR operation failed user_id=123 action=delete resource=account
 }
 
-// ExampleAttrList_ToSlogArgs demonstrates converting errx.AttrList to []any for use with slog convenience methods
+// ExampleAttrList_ToSlogArgs demonstrates converting errx.AttrList to []any
+// for use with slog convenience methods. As with ExampleAttrList_ToSlogAttrs,
+// the output format is controlled by an in-test handler to remain stable.
 func ExampleAttrList_ToSlogArgs() {
 	// Create an error with attributes
 	err := errx.Attrs("user_id", 123, "action", "delete", "resource", "account")
@@ -496,20 +496,38 @@ func ExampleAttrList_ToSlogArgs() {
 	// Convert to []any for use with Error/Info/Warn methods
 	slogArgs := attrs.ToSlogArgs()
 
-	// Use with slog logger's convenience methods
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Remove time for consistent output
-			if a.Key == slog.TimeKey {
-				return slog.Attr{}
-			}
-			return a
-		},
-	}))
+	// Use with slog logger backed by an example-controlled handler.
+	logger := slog.New(newExampleHandler(os.Stdout))
 
 	// Error/Info/Warn methods accept ...any
 	logger.Error("operation failed", slogArgs...)
 
 	// Output:
-	// level=ERROR msg="operation failed" user_id=123 action=delete resource=account
+	// ERROR operation failed user_id=123 action=delete resource=account
 }
+
+// exampleHandler is a minimal slog.Handler used by the slog examples to keep
+// their // Output: assertions stable across Go versions. It prints records as
+// "<LEVEL> <message> [k=v...]" without timestamps.
+type exampleHandler struct {
+	w io.Writer
+}
+
+func newExampleHandler(w io.Writer) *exampleHandler { return &exampleHandler{w: w} }
+
+func (*exampleHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *exampleHandler) Handle(_ context.Context, r slog.Record) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s", r.Level.String(), r.Message)
+	r.Attrs(func(a slog.Attr) bool {
+		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
+		return true
+	})
+	b.WriteByte('\n')
+	_, err := io.WriteString(h.w, b.String())
+	return err
+}
+
+func (h *exampleHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *exampleHandler) WithGroup(string) slog.Handler      { return h }
