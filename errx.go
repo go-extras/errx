@@ -106,7 +106,40 @@ package errx
 import (
 	"errors"
 	"fmt"
+	"unsafe"
 )
+
+// isNilClassified reports whether the given Classified is nil in any form:
+// either an untyped-nil interface, or a typed-nil interface (e.g. a
+// `(*sentinel)(nil)` stored in a Classified). The latter case slips past a
+// plain `c != nil` check because the interface still has a non-nil type
+// pointer. Detecting it without reflection avoids the runtime cost of
+// reflect.ValueOf while remaining safe: we only inspect the interface header.
+func isNilClassified(c Classified) bool {
+	if c == nil {
+		return true
+	}
+	type iface struct {
+		typ  unsafe.Pointer
+		data unsafe.Pointer
+	}
+	return (*iface)(unsafe.Pointer(&c)).data == nil
+}
+
+// nonNilClassifications returns a slice containing only the non-nil entries
+// of cs (including typed-nil entries, which would otherwise panic when their
+// methods dereference receiver state). Reuses cs's backing array when
+// possible by filtering in-place via a zero-cap re-slice.
+func nonNilClassifications(cs []Classified) []Classified {
+	out := cs[:0:0]
+	for _, c := range cs {
+		if isNilClassified(c) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
 
 // Classified is an interface for errors that can be classified.
 // This interface can be implemented by external packages to extend the library.
@@ -220,6 +253,7 @@ func (*sentinel) IsClassified() bool {
 //	ErrDatabaseCritical := errx.NewSentinel("critical database error", ErrDatabase, ErrCritical)
 //	// Matches itself, ErrDatabase, and ErrCritical
 func NewSentinel(text string, parents ...Classified) Classified {
+	parents = nonNilClassifications(parents)
 	if len(parents) == 0 {
 		return &sentinel{text: text}
 	}
@@ -237,6 +271,7 @@ func Wrap(text string, cause error, classifications ...Classified) error {
 	if cause == nil {
 		return nil
 	}
+	classifications = nonNilClassifications(classifications)
 	if len(classifications) == 0 {
 		return fmt.Errorf("%s: %w", text, cause)
 	}
@@ -288,6 +323,7 @@ func classify(cause error, classifications ...Classified) error {
 	if cause == nil {
 		return nil
 	}
+	classifications = nonNilClassifications(classifications)
 	return &carrier{classifications: classifications, cause: cause}
 }
 
