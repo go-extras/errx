@@ -127,16 +127,30 @@ func isNilClassified(c Classified) bool {
 }
 
 // nonNilClassifications returns a slice containing only the non-nil entries
-// of cs (including typed-nil entries, which would otherwise panic when their
-// methods dereference receiver state). Reuses cs's backing array when
-// possible by filtering in-place via a zero-cap re-slice.
+// of cs (filtering out both untyped-nil and typed-nil interface values, which
+// would otherwise panic when their methods dereference receiver state).
+//
+// Returns the input slice unchanged (with zero allocations) when no nil
+// entries are present, which is the common case. Otherwise allocates a new
+// slice and copies the surviving entries into it.
 func nonNilClassifications(cs []Classified) []Classified {
-	out := cs[:0:0]
-	for _, c := range cs {
+	// Fast path: scan once; if every entry is non-nil, return cs as-is.
+	nilIdx := -1
+	for i, c := range cs {
 		if isNilClassified(c) {
-			continue
+			nilIdx = i
+			break
 		}
-		out = append(out, c)
+	}
+	if nilIdx == -1 {
+		return cs
+	}
+	out := make([]Classified, 0, len(cs)-1)
+	out = append(out, cs[:nilIdx]...)
+	for _, c := range cs[nilIdx+1:] {
+		if !isNilClassified(c) {
+			out = append(out, c)
+		}
 	}
 	return out
 }
