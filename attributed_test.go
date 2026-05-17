@@ -204,6 +204,78 @@ func TestWithAttrs_WithEmptyAttrs(t *testing.T) {
 	}
 }
 
+// TestHasAttrs_EmptyAttrs_ConsistentWithExtract verifies that HasAttrs and
+// ExtractAttrs agree for an attributed error with no attributes. Previously
+// HasAttrs returned true while ExtractAttrs returned nil, producing the
+// confusing "empty extraction" path documented in the README.
+func TestHasAttrs_EmptyAttrs_ConsistentWithExtract(t *testing.T) {
+	e := errx.Attrs() // no key-value pairs
+
+	hasAttrs := errx.HasAttrs(e)
+	extracted := errx.ExtractAttrs(e)
+
+	if hasAttrs && len(extracted) == 0 {
+		t.Errorf("HasAttrs(empty) = true but ExtractAttrs = %v (len %d); expected consistency",
+			extracted, len(extracted))
+	}
+	if hasAttrs {
+		t.Error("expected HasAttrs(empty) == false to match empty ExtractAttrs")
+	}
+}
+
+// TestHasAttrs_FromAttrMapNil_ConsistentWithExtract checks the same
+// consistency for FromAttrMap(nil) and FromAttrMap(map[string]any{}).
+func TestHasAttrs_FromAttrMapNil_ConsistentWithExtract(t *testing.T) {
+	cases := []struct {
+		name string
+		m    map[string]any
+	}{
+		{"nil map", nil},
+		{"empty map", make(map[string]any)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := errx.FromAttrMap(tc.m)
+
+			hasAttrs := errx.HasAttrs(e)
+			extracted := errx.ExtractAttrs(e)
+
+			if hasAttrs && len(extracted) == 0 {
+				t.Errorf("HasAttrs = true but ExtractAttrs is empty; inconsistent")
+			}
+			if hasAttrs {
+				t.Error("expected HasAttrs == false for empty attributed error")
+			}
+		})
+	}
+}
+
+// TestHasAttrs_NonEmptyInWrappedChain confirms the walk still finds non-empty
+// attributed errors deep in the chain (positive case after the change).
+func TestHasAttrs_NonEmptyInWrappedChain(t *testing.T) {
+	inner := errx.Attrs("k", "v")
+	outer := fmt.Errorf("ctx: %w", inner)
+
+	if !errx.HasAttrs(outer) {
+		t.Error("expected HasAttrs to find inner attributed error with attrs")
+	}
+}
+
+// TestHasAttrs_EmptyThenNonEmpty checks that an empty attributed error in
+// the chain doesn't mask a later non-empty one.
+func TestHasAttrs_EmptyThenNonEmpty(t *testing.T) {
+	inner := errx.Attrs("k", "v")
+	// Compose a chain that has an empty attributed earlier (via Classify)
+	// and a non-empty one deeper.
+	mid := errx.Classify(inner, errx.Attrs())
+	outer := fmt.Errorf("ctx: %w", mid)
+
+	if !errx.HasAttrs(outer) {
+		t.Error("expected HasAttrs to return true when chain contains a non-empty attributed")
+	}
+}
+
 func TestFromAttrMap_WithEmptyMap(t *testing.T) {
 	attributed := errx.FromAttrMap(make(map[string]any))
 
