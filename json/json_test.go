@@ -228,7 +228,10 @@ func TestMarshal_ComplexError(t *testing.T) {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
 
-	// Verify all components are present
+	// Verify all components are present.
+	//
+	// DisplayText, Attributes, and StackTrace are chain-wide: the top level
+	// reflects what is present anywhere in the chain.
 	if result.DisplayText != "Service temporarily unavailable" {
 		t.Errorf("DisplayText = %q, want %q", result.DisplayText, "Service temporarily unavailable")
 	}
@@ -238,8 +241,25 @@ func TestMarshal_ComplexError(t *testing.T) {
 	if len(result.StackTrace) == 0 {
 		t.Error("StackTrace is empty")
 	}
-	if len(result.Sentinels) == 0 {
-		t.Error("Sentinels is empty")
+
+	// Sentinels are level-scoped (see issue #14, bug 3). The ErrTimeoutTest
+	// classification was attached at the inner errx.Classify call, so it
+	// surfaces at the cause level — not at the top stacktrace.Wrap level,
+	// whose only classification is the trace itself.
+	if len(result.Sentinels) != 0 {
+		t.Errorf("top-level Sentinels = %v, want empty (sentinel attached at inner level)", result.Sentinels)
+	}
+	if result.Cause == nil {
+		t.Fatal("Cause is nil; sentinel should be reported at this level")
+	}
+	gotTimeout := false
+	for _, s := range result.Cause.Sentinels {
+		if s == "timeout" {
+			gotTimeout = true
+		}
+	}
+	if !gotTimeout {
+		t.Errorf("Cause.Sentinels = %v, want to contain \"timeout\"", result.Cause.Sentinels)
 	}
 }
 
@@ -428,32 +448,7 @@ func TestWithIncludeStandardErrors_True(t *testing.T) {
 	}
 }
 
-func TestMultiError(t *testing.T) {
-	// Create a multi-error (errors that unwrap to []error)
-	type multiError struct {
-		errs []error
-	}
-
-	me := &multiError{
-		errs: []error{
-			errors.New("error 1"),
-			errors.New("error 2"),
-			errors.New("error 3"),
-		},
-	}
-
-	// Implement Unwrap() []error
-	type unwrapper interface {
-		Unwrap() []error
-	}
-
-	if _, ok := any(me).(unwrapper); !ok {
-		// Need to add method
-		t.Skip("Need to implement Unwrap() []error for test")
-	}
-}
-
-// multiError implements Unwrap() []error for testing
+// testMultiError implements Unwrap() []error for testing.
 type testMultiError struct {
 	message string
 	errs    []error
@@ -632,50 +627,91 @@ func TestMarshal_UnhashableErrorChain(t *testing.T) {
 }
 
 func TestMarshal_MixedHashableUnhashable(t *testing.T) {
-	// Test a chain with both hashable and unhashable errors
+	// Build a chain that interleaves hashable and unhashable errors so the
+	// resulting SerializedError shape can be pinned in full.
 	hashableErr := errors.New("hashable error")
 	unhashableErr := &unhashableError{
 		message: "unhashable error",
 		data:    map[string]any{"key": "value"},
 	}
 
-	// Create a chain with mixed hashable/unhashable errors
-	err1 := errx.Wrap("wrap1", hashableErr, ErrDatabaseTest)
+	// finalErr shape (top -> base):
+	//   stacktrace.Wrap("final", stacktrace.Wrap("wrap3", errx.Wrap("wrap2", unhashableErr)))
 	err2 := errx.Wrap("wrap2", unhashableErr)
 	err3 := stacktrace.Wrap("wrap3", err2)
 	finalErr := stacktrace.Wrap("final", err3)
-	// Also wrap the first error separately
-	anotherErr := errx.Wrap("another", err1)
 
-	// Should handle mixed hashable/unhashable errors
 	data, err := errxjson.Marshal(finalErr)
 	if err != nil {
-		t.Fatalf("Marshal error: %v", err)
+		t.Fatalf("Marshal finalErr error: %v", err)
 	}
 
 	var result errxjson.SerializedError
 	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("Unmarshal error: %v", err)
+		t.Fatalf("Unmarshal finalErr error: %v", err)
 	}
 
-	// Verify it serialized successfully
-	if result.Message == "" {
-		t.Error("Message should not be empty")
+	wantMsg := "final: wrap3: wrap2: unhashable error"
+	if result.Message != wantMsg {
+		t.Errorf("finalErr.Message = %q, want %q", result.Message, wantMsg)
+	}
+	if len(result.StackTrace) == 0 {
+		t.Error("finalErr should have a stack trace from the outer stacktrace.Wrap")
+	}
+	// Walk the cause chain; we must reach a frame whose Message is the inner
+	// unhashable error message and verify no panic occurred along the way.
+	foundUnhashable := false
+	for cur := result.Cause; cur != nil; cur = cur.Cause {
+		if cur.Message == "unhashable error" {
+			foundUnhashable = true
+			break
+		}
+	}
+	if !foundUnhashable {
+		t.Errorf("expected to find 'unhashable error' in cause chain; got chain rooted at %q", result.Message)
 	}
 
-	// Also test the other error
+	// Now do the same for the hashable-only branch.
+	err1 := errx.Wrap("wrap1", hashableErr, ErrDatabaseTest)
+	anotherErr := errx.Wrap("another", err1)
+
 	data2, err := errxjson.Marshal(anotherErr)
 	if err != nil {
-		t.Fatalf("Marshal error for anotherErr: %v", err)
+		t.Fatalf("Marshal anotherErr error: %v", err)
 	}
 
 	var result2 errxjson.SerializedError
 	if err := json.Unmarshal(data2, &result2); err != nil {
-		t.Fatalf("Unmarshal error for anotherErr: %v", err)
+		t.Fatalf("Unmarshal anotherErr error: %v", err)
 	}
 
-	if result2.Message == "" {
-		t.Error("Message should not be empty")
+	wantMsg2 := "another: wrap1: hashable error"
+	if result2.Message != wantMsg2 {
+		t.Errorf("anotherErr.Message = %q, want %q", result2.Message, wantMsg2)
+	}
+	// The "database" sentinel attached at wrap1 should surface in the chain.
+	foundDB := false
+	for cur := &result2; cur != nil; cur = cur.Cause {
+		for _, s := range cur.Sentinels {
+			if s == "database" {
+				foundDB = true
+				break
+			}
+		}
+		if foundDB {
+			break
+		}
+	}
+	if !foundDB {
+		t.Error("expected to find 'database' sentinel in serialized chain for anotherErr")
+	}
+	// Verify the inner-most cause is the hashable base error.
+	leaf := &result2
+	for leaf.Cause != nil {
+		leaf = leaf.Cause
+	}
+	if leaf.Message != "hashable error" {
+		t.Errorf("anotherErr leaf message = %q, want %q", leaf.Message, "hashable error")
 	}
 }
 
@@ -708,7 +744,15 @@ func TestMarshal_PointerIdentity(t *testing.T) {
 }
 
 // TestMarshal_SamePointerMultipleTimes verifies that the same error instance
-// appearing multiple times in the error tree is handled correctly by circular detection.
+// appearing in multiple sibling branches is serialized fully in each branch.
+//
+// History: this test previously asserted that the second branch's cause was
+// rendered as "(circular reference)" because the visited set was threaded
+// across all branches. That codified the bug fixed in issue #14 (bug 2):
+// shared-cause / diamond patterns being misclassified as cycles. After the
+// fix, visited tracking is per-path (push on entry, pop on exit), so each
+// branch in a multi-error gets an independent view and a pointer that
+// legitimately appears in a sibling is serialized normally.
 func TestMarshal_SamePointerMultipleTimes(t *testing.T) {
 	baseErr := &unhashableError{
 		message: "shared error",
@@ -745,30 +789,19 @@ func TestMarshal_SamePointerMultipleTimes(t *testing.T) {
 		t.Fatalf("len(Causes) = %d, want 2", len(result.Causes))
 	}
 
-	// First wrapper should be fully serialized
-	if result.Causes[0].Message != "first occurrence: shared error" {
-		t.Errorf("Causes[0].Message = %q, want %q", result.Causes[0].Message, "first occurrence: shared error")
-	}
-	// First wrapper should have the base error as its cause
-	if result.Causes[0].Cause == nil {
-		t.Fatal("Causes[0].Cause should not be nil")
-	}
-	if result.Causes[0].Cause.Message != "shared error" {
-		t.Errorf("Causes[0].Cause.Message = %q, want %q", result.Causes[0].Cause.Message, "shared error")
-	}
-
-	// Second wrapper should also be serialized
-	if result.Causes[1].Message != "second occurrence: shared error" {
-		t.Errorf("Causes[1].Message = %q, want %q", result.Causes[1].Message, "second occurrence: shared error")
-	}
-	// Second wrapper's cause should be marked as circular reference
-	// because baseErr was already visited when processing the first branch
-	if result.Causes[1].Cause == nil {
-		t.Fatal("Causes[1].Cause should not be nil")
-	}
-	if result.Causes[1].Cause.Message != "(circular reference)" {
-		t.Errorf("Causes[1].Cause.Message = %q, want %q (circular reference detected)",
-			result.Causes[1].Cause.Message, "(circular reference)")
+	// Both branches should serialize fully and identically — the shared
+	// pointer in the second branch must not be flagged circular.
+	for i, want := range []string{"first occurrence: shared error", "second occurrence: shared error"} {
+		if result.Causes[i].Message != want {
+			t.Errorf("Causes[%d].Message = %q, want %q", i, result.Causes[i].Message, want)
+		}
+		if result.Causes[i].Cause == nil {
+			t.Fatalf("Causes[%d].Cause should not be nil", i)
+		}
+		if result.Causes[i].Cause.Message != "shared error" {
+			t.Errorf("Causes[%d].Cause.Message = %q, want %q (DAG sharing must not be flagged circular)",
+				i, result.Causes[i].Cause.Message, "shared error")
+		}
 	}
 }
 

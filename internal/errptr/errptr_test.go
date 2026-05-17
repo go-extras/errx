@@ -42,6 +42,49 @@ func TestGet_Nil(t *testing.T) {
 	}
 }
 
+// makeTypedNil returns an error interface holding a typed-nil *pointerError.
+// It exists in a helper so that the typed-nil-vs-interface comparison logic
+// is opaque to staticcheck's SA4023 (which would otherwise flag the in-test
+// comparison as "never true").
+func makeTypedNil() error {
+	var pErr *pointerError
+	return pErr
+}
+
+// TestGet_TypedNil verifies that typed-nil errors (an interface with a
+// non-nil type pointer but a nil data pointer) return 0. Returning 0 lets
+// callers' "skip if 0" sentinel handling work correctly, instead of having
+// multiple typed-nil errors collide on the same non-zero key.
+func TestGet_TypedNil(t *testing.T) {
+	e := makeTypedNil() // interface holding typed-nil
+
+	if e == nil {
+		t.Fatal("test precondition failed: typed-nil should compare != nil as interface")
+	}
+
+	ptr := errptr.Get(e)
+	if ptr != 0 {
+		t.Errorf("Get(typed-nil) = %v, want 0", ptr)
+	}
+}
+
+// TestGet_TypedNil_DAGCollision verifies that two distinct typed-nil errors
+// of the same underlying type both yield 0 and therefore do not falsely
+// appear as the same identity for visited-set tracking (callers use 0 as a
+// sentinel meaning "do not record"). Prior to the fix, both returned the
+// same non-zero key, causing spurious "(circular reference)" reports.
+func TestGet_TypedNil_DAGCollision(t *testing.T) {
+	e1 := makeTypedNil()
+	e2 := makeTypedNil()
+
+	ptr1 := errptr.Get(e1)
+	ptr2 := errptr.Get(e2)
+
+	if ptr1 != 0 || ptr2 != 0 {
+		t.Errorf("typed-nil pointers should return 0, got ptr1=%v ptr2=%v", ptr1, ptr2)
+	}
+}
+
 func TestGet_PointerError_SameInstance(t *testing.T) {
 	err := &pointerError{msg: "test"}
 	var e1 error = err

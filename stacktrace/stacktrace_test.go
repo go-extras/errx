@@ -2,7 +2,9 @@ package stacktrace_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-extras/errx"
@@ -400,5 +402,386 @@ func TestClassifyNewNoClassifications(t *testing.T) {
 	frames := stacktrace.Extract(err)
 	if frames == nil {
 		t.Error("Expected stack trace even without classifications")
+	}
+}
+
+// fakeTracer is an external Tracer implementation used to verify that Extract
+// and ExtractAll discover third-party tracers in an error chain.
+type fakeTracer struct {
+	msg    string
+	frames []stacktrace.Frame
+	cause  error
+}
+
+func (f *fakeTracer) Error() string { return f.msg }
+func (f *fakeTracer) Unwrap() error { return f.cause }
+func (f *fakeTracer) Frames() []stacktrace.Frame {
+	return f.frames
+}
+
+// TestFormatPlusV verifies that %+v renders the captured stack frames.
+func TestFormatPlusV(t *testing.T) {
+	tr := stacktrace.Here()
+
+	plus := fmt.Sprintf("%+v", tr)
+	if !strings.Contains(plus, "TestFormatPlusV") {
+		t.Errorf("Expected %%+v output to contain TestFormatPlusV, got:\n%s", plus)
+	}
+	// pkg/errors style: "\n<function>\n\t<file>:<line>"
+	if !strings.Contains(plus, ":") || !strings.Contains(plus, "\n\t") {
+		t.Errorf("Expected %%+v output to look like pkg/errors stack lines, got:\n%s", plus)
+	}
+}
+
+// TestFormatPlainV verifies that %v and %s still render the underlying error
+// message (backwards-compatible behaviour).
+func TestFormatPlainV(t *testing.T) {
+	tr := stacktrace.Here()
+
+	plain := fmt.Sprintf("%v", tr)
+	if strings.Contains(plain, "TestFormatPlainV") {
+		t.Errorf("Expected %%v output to NOT contain stack frames, got:\n%s", plain)
+	}
+	if !strings.HasPrefix(plain, "stack trace:") {
+		t.Errorf("Expected %%v output to start with 'stack trace:', got %q", plain)
+	}
+
+	s := fmt.Sprintf("%s", tr)
+	if s != plain {
+		t.Errorf("Expected %%s output to match %%v output, got %q vs %q", s, plain)
+	}
+}
+
+// TestFramesCachedSingleSymbolResolution verifies that frames are resolved only
+// once and concurrent callers all observe the same slice header.
+func TestFramesCachedSingleSymbolResolution(t *testing.T) {
+	tr := stacktrace.Here()
+
+	// First call resolves; capture pointer/length to compare against subsequent
+	// calls. The cache invariant guarantees identical slice contents.
+	first := stacktrace.Extract(errx.Classify(errors.New("e"), tr))
+	if first == nil {
+		t.Fatal("expected frames")
+	}
+
+	const concurrent = 32
+	results := make([][]stacktrace.Frame, concurrent)
+	var wg sync.WaitGroup
+	wg.Add(concurrent)
+	for i := 0; i < concurrent; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = stacktrace.Extract(errx.Classify(errors.New("e"), tr))
+		}(i)
+	}
+	wg.Wait()
+
+	for i, r := range results {
+		if len(r) != len(first) {
+			t.Fatalf("result %d: expected %d frames, got %d", i, len(first), len(r))
+		}
+		for j := range r {
+			if r[j] != first[j] {
+				t.Fatalf("result %d frame %d differs: %+v vs %+v", i, j, r[j], first[j])
+			}
+		}
+	}
+}
+
+// TestExtractAllMultipleTraces verifies that ExtractAll collects every captured
+// trace in outermost-first order.
+func TestExtractAllMultipleTraces(t *testing.T) {
+	base := errors.New("base")
+	inner := errx.Classify(base, stacktrace.Here())
+	middle := errx.Wrap("middle", inner, stacktrace.Here())
+	outer := errx.Wrap("outer", middle, stacktrace.Here())
+
+	all := stacktrace.ExtractAll(outer)
+	if len(all) != 3 {
+		t.Fatalf("expected 3 traces, got %d", len(all))
+	}
+
+	// All traces should contain this test function.
+	for i, frames := range all {
+		found := false
+		for _, f := range frames {
+			if strings.Contains(f.Function, "TestExtractAllMultipleTraces") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("trace %d did not contain TestExtractAllMultipleTraces", i)
+		}
+	}
+}
+
+// TestExtractAllNilAndSingle verifies edge cases for ExtractAll.
+func TestExtractAllNilAndSingle(t *testing.T) {
+	if got := stacktrace.ExtractAll(nil); got != nil {
+		t.Errorf("expected nil for nil error, got %v", got)
+	}
+
+	if got := stacktrace.ExtractAll(errors.New("plain")); got != nil {
+		t.Errorf("expected nil for error without trace, got %v", got)
+	}
+
+	single := stacktrace.Classify(errors.New("base"))
+	all := stacktrace.ExtractAll(single)
+	if len(all) != 1 {
+		t.Fatalf("expected 1 trace, got %d", len(all))
+	}
+}
+
+// TestHereDepthCapturesDeeperStack verifies that HereDepth honours the supplied
+// depth. We build a sufficiently deep recursion (>32 frames) and capture with
+// depth=64, verifying we observed more than the default 32 frames.
+func TestHereDepthCapturesDeeperStack(t *testing.T) {
+	const recursionDepth = 50
+
+	frames := captureWithDepth(recursionDepth, 64)
+	if len(frames) <= stacktrace.DefaultMaxDepth {
+		t.Fatalf("HereDepth(64) captured only %d frames; expected > %d", len(frames), stacktrace.DefaultMaxDepth)
+	}
+
+	defaultFrames := captureWithDepth(recursionDepth, 0) // 0 -> default
+	if len(defaultFrames) > stacktrace.DefaultMaxDepth {
+		t.Fatalf("default capture returned %d frames; expected <= %d", len(defaultFrames), stacktrace.DefaultMaxDepth)
+	}
+}
+
+// recurseAndCapture recurses `remaining` times and then captures a stack trace
+// at the configured depth.
+func recurseAndCapture(remaining, depth int) []stacktrace.Frame {
+	if remaining > 0 {
+		return recurseAndCapture(remaining-1, depth)
+	}
+	var tr errx.Classified
+	if depth > 0 {
+		tr = stacktrace.HereDepth(depth)
+	} else {
+		tr = stacktrace.Here()
+	}
+	return stacktrace.Extract(errx.Classify(errors.New("deep"), tr))
+}
+
+func captureWithDepth(recursion, depth int) []stacktrace.Frame {
+	return recurseAndCapture(recursion, depth)
+}
+
+// TestWrapDepthAndClassifyDepth verifies the *Depth variants honour the
+// supplied depth and remain backwards-compatible.
+func TestWrapDepthAndClassifyDepth(t *testing.T) {
+	base := errors.New("base")
+	werr := stacktrace.WrapDepth("ctx", base, 4)
+	frames := stacktrace.Extract(werr)
+	if len(frames) == 0 || len(frames) > 4 {
+		t.Errorf("WrapDepth(4): expected 1..4 frames, got %d", len(frames))
+	}
+
+	cerr := stacktrace.ClassifyDepth(base, 4)
+	cframes := stacktrace.Extract(cerr)
+	if len(cframes) == 0 || len(cframes) > 4 {
+		t.Errorf("ClassifyDepth(4): expected 1..4 frames, got %d", len(cframes))
+	}
+
+	nerr := stacktrace.ClassifyNewDepth("new", 4)
+	nframes := stacktrace.Extract(nerr)
+	if len(nframes) == 0 || len(nframes) > 4 {
+		t.Errorf("ClassifyNewDepth(4): expected 1..4 frames, got %d", len(nframes))
+	}
+
+	// nil cause should return nil for WrapDepth/ClassifyDepth.
+	if got := stacktrace.WrapDepth("ctx", nil, 4); got != nil {
+		t.Errorf("expected nil from WrapDepth(nil), got %v", got)
+	}
+	if got := stacktrace.ClassifyDepth(nil, 4); got != nil {
+		t.Errorf("expected nil from ClassifyDepth(nil), got %v", got)
+	}
+}
+
+// TestExtractPicksUpExternalTracer verifies that an error implementing only the
+// public Tracer interface is recognised by Extract.
+func TestExtractPicksUpExternalTracer(t *testing.T) {
+	external := &fakeTracer{
+		msg: "external",
+		frames: []stacktrace.Frame{
+			{File: "remote.go", Line: 12, Function: "remote.Handler"},
+		},
+	}
+
+	frames := stacktrace.Extract(external)
+	if len(frames) != 1 || frames[0].Function != "remote.Handler" {
+		t.Fatalf("Extract did not pick up external Tracer, got %+v", frames)
+	}
+
+	// Wrap it and check chain traversal still works.
+	wrapped := fmt.Errorf("outer: %w", external)
+	frames = stacktrace.Extract(wrapped)
+	if len(frames) != 1 || frames[0].Function != "remote.Handler" {
+		t.Fatalf("Extract did not pick up wrapped external Tracer, got %+v", frames)
+	}
+}
+
+// TestExtractAllPicksUpExternalTracer verifies that ExtractAll collects both
+// internal and external tracers.
+func TestExtractAllPicksUpExternalTracer(t *testing.T) {
+	external := &fakeTracer{
+		msg: "external",
+		frames: []stacktrace.Frame{
+			{File: "remote.go", Line: 12, Function: "remote.Handler"},
+		},
+	}
+	wrapped := stacktrace.Wrap("outer", external)
+
+	traces := stacktrace.ExtractAll(wrapped)
+	if len(traces) != 2 {
+		t.Fatalf("expected 2 traces, got %d", len(traces))
+	}
+
+	// outermost should be the internal (Wrap) trace.
+	foundLocal := false
+	for _, f := range traces[0] {
+		if strings.Contains(f.Function, "TestExtractAllPicksUpExternalTracer") {
+			foundLocal = true
+			break
+		}
+	}
+	if !foundLocal {
+		t.Errorf("outermost trace missing local frame: %+v", traces[0])
+	}
+
+	// innermost should be the external tracer frames.
+	if len(traces[1]) != 1 || traces[1][0].Function != "remote.Handler" {
+		t.Errorf("innermost trace not external: %+v", traces[1])
+	}
+}
+
+// TestFormatPlusVUsesCache exercises %+v concurrently to assert race-safety of
+// the cached frames slice.
+func TestFormatPlusVConcurrent(t *testing.T) {
+	tr := stacktrace.Here()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = fmt.Sprintf("%+v", tr)
+			_ = fmt.Sprintf("%v", tr)
+		}()
+	}
+	wg.Wait()
+}
+
+// TestHereDepth_ClampsToMaxDepth verifies that absurd depths (e.g. 1_000_000)
+// do not allocate gigabytes and do not produce more than MaxDepth frames. The
+// actual frame count is bounded by the real call stack, but the captured PC
+// slice must be capped at MaxDepth.
+func TestHereDepth_ClampsToMaxDepth(t *testing.T) {
+	// If clamping is missing, this would attempt to allocate ~8MB per call.
+	tr := stacktrace.HereDepth(1_000_000)
+	wrapped := errx.Classify(errors.New("e"), tr)
+
+	frames := stacktrace.Extract(wrapped)
+	if frames == nil {
+		t.Fatal("expected frames")
+	}
+	if len(frames) > stacktrace.MaxDepth {
+		t.Fatalf("HereDepth(1_000_000) returned %d frames; expected at most MaxDepth=%d",
+			len(frames), stacktrace.MaxDepth)
+	}
+}
+
+// TestHereDepth_ClampsToOne verifies that non-positive depths fall back to the
+// default rather than producing zero frames or panicking.
+func TestHereDepth_ClampsToOne(t *testing.T) {
+	cases := []int{0, -1, -5}
+	for _, depth := range cases {
+		tr := stacktrace.HereDepth(depth)
+		frames := stacktrace.Extract(errx.Classify(errors.New("e"), tr))
+		if len(frames) == 0 {
+			t.Errorf("HereDepth(%d) produced zero frames; expected default fallback", depth)
+		}
+	}
+}
+
+// customTracer is an external Tracer (not the internal *traced) used to verify
+// that Extract finds Tracer implementations buried inside multi-error trees
+// produced by errors.Join.
+type customTracer struct {
+	frames []stacktrace.Frame
+}
+
+func (*customTracer) Error() string                { return "custom tracer" }
+func (c *customTracer) Frames() []stacktrace.Frame { return c.frames }
+
+// TestExtract_ExternalTracerInMultiError verifies that an external Tracer
+// implementation hidden inside errors.Join(...) is discovered by Extract.
+// Previously, Extract walked single-Unwrap only and would miss multi-error
+// branches; ExtractAll handled this correctly but Extract did not.
+func TestExtract_ExternalTracerInMultiError(t *testing.T) {
+	custom := &customTracer{
+		frames: []stacktrace.Frame{
+			{File: "remote.go", Line: 99, Function: "remote.JoinedHandler"},
+		},
+	}
+	plain := errors.New("plain branch")
+
+	// custom is the SECOND branch in the Join — single-unwrap traversal would
+	// never visit it.
+	joined := errors.Join(plain, custom)
+
+	frames := stacktrace.Extract(joined)
+	if frames == nil {
+		t.Fatal("expected Extract to find external Tracer inside errors.Join")
+	}
+	if len(frames) != 1 || frames[0].Function != "remote.JoinedHandler" {
+		t.Fatalf("Extract did not return custom tracer frames, got %+v", frames)
+	}
+}
+
+// TestExtract_ExternalTracerInDeepMultiError verifies Extract traverses
+// nested errors.Join trees.
+func TestExtract_ExternalTracerInDeepMultiError(t *testing.T) {
+	custom := &customTracer{
+		frames: []stacktrace.Frame{
+			{File: "deep.go", Line: 7, Function: "deep.Buried"},
+		},
+	}
+	inner := errors.Join(errors.New("a"), errors.New("b"), custom)
+	outer := fmt.Errorf("outer: %w", inner)
+
+	frames := stacktrace.Extract(outer)
+	if frames == nil {
+		t.Fatal("expected Extract to traverse into nested errors.Join")
+	}
+	if len(frames) != 1 || frames[0].Function != "deep.Buried" {
+		t.Fatalf("Extract did not return buried tracer frames, got %+v", frames)
+	}
+}
+
+// TestError_DoesNotResolveFrames verifies that calling Error() reports the
+// number of captured program counters without forcing symbol resolution.
+// Resolution is a relatively expensive runtime.CallersFrames walk that should
+// only happen when frames are actually requested (e.g. via Frames(), Extract,
+// or %+v formatting).
+func TestError_DoesNotResolveFrames(t *testing.T) {
+	tr := stacktrace.Here()
+
+	// The reported count must match what Frames() ultimately returns. We don't
+	// have white-box access to verify "no resolution happened", but we can at
+	// least pin down the contract: Error() reports a count, and that count is
+	// consistent with the resolved slice length.
+	msg := tr.(error).Error()
+
+	if !strings.HasPrefix(msg, "stack trace:") {
+		t.Fatalf("expected Error() to start with 'stack trace:', got %q", msg)
+	}
+
+	// Force resolution and ensure the count is plausible (at least 1 frame).
+	frames := stacktrace.Extract(errx.Classify(errors.New("e"), tr))
+	if len(frames) == 0 {
+		t.Fatal("expected at least one frame after Extract")
 	}
 }

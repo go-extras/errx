@@ -527,6 +527,139 @@ func TestCarrier_AsMethod(t *testing.T) {
 	}
 }
 
+// nilClassified is a test-only Classified whose methods would panic if
+// invoked on a typed-nil receiver. It's used to verify that the public API
+// filters typed-nil values before they reach call sites that dereference the
+// receiver.
+type nilClassified struct {
+	parents []errx.Classified
+}
+
+func (n *nilClassified) Error() string {
+	// Dereferencing n.parents on a nil receiver panics; this matches the
+	// real-world panic the fix protects against.
+	_ = n.parents
+	return "nil-classified"
+}
+
+func (*nilClassified) IsClassified() bool { return true }
+
+// TestWrap_TypedNilClassified verifies that Wrap with typed-nil Classified
+// values does not panic and does not propagate the typed-nil into the chain.
+func TestWrap_TypedNilClassified(t *testing.T) {
+	var nc *nilClassified // typed-nil
+	baseErr := errors.New("base error")
+
+	// Must not panic.
+	wrapped := errx.Wrap("ctx", baseErr, nc)
+	if wrapped == nil {
+		t.Fatal("expected non-nil wrapped error")
+	}
+	if wrapped.Error() != "ctx: base error" {
+		t.Errorf("expected 'ctx: base error', got %q", wrapped.Error())
+	}
+	// And no method dispatch on the typed-nil should be triggered by Is.
+	if !errors.Is(wrapped, baseErr) {
+		t.Error("expected wrapped to match base error")
+	}
+}
+
+// TestWrap_UntypedNilClassified verifies that a plain nil Classified is also
+// filtered without panicking.
+func TestWrap_UntypedNilClassified(t *testing.T) {
+	baseErr := errors.New("base error")
+
+	wrapped := errx.Wrap("ctx", baseErr, nil)
+	if wrapped == nil {
+		t.Fatal("expected non-nil wrapped error")
+	}
+	if !errors.Is(wrapped, baseErr) {
+		t.Error("expected wrapped to match base error")
+	}
+}
+
+// TestClassify_TypedNilClassified verifies that Classify with typed-nil
+// Classified values does not panic.
+func TestClassify_TypedNilClassified(t *testing.T) {
+	var nc *nilClassified
+	baseErr := errors.New("base error")
+
+	classified := errx.Classify(baseErr, nc)
+	if classified == nil {
+		t.Fatal("expected non-nil classified error")
+	}
+	if !errors.Is(classified, baseErr) {
+		t.Error("expected classified to match base error")
+	}
+}
+
+// TestClassifyNew_TypedNilClassified verifies that ClassifyNew with typed-nil
+// Classified values does not panic.
+func TestClassifyNew_TypedNilClassified(t *testing.T) {
+	var nc *nilClassified
+
+	err := errx.ClassifyNew("new error", nc)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if err.Error() != "new error" {
+		t.Errorf("expected 'new error', got %q", err.Error())
+	}
+}
+
+// TestNewSentinel_TypedNilParent verifies that a sentinel built with a
+// typed-nil parent does not panic on Is, and that the typed-nil parent is
+// not retained (so it cannot blow up later).
+func TestNewSentinel_TypedNilParent(t *testing.T) {
+	var nc *nilClassified // typed-nil parent
+
+	s := errx.NewSentinel("child", nc)
+	if s == nil {
+		t.Fatal("expected non-nil sentinel")
+	}
+
+	// The classic failure mode: errors.Is iterates parents and calls Is on
+	// each, which would deref the typed-nil receiver and panic.
+	other := errx.NewSentinel("other")
+	if errors.Is(s, other) {
+		t.Error("expected child not to match unrelated sentinel")
+	}
+	// And matching itself still works.
+	if !errors.Is(s, s) {
+		t.Error("expected child to match itself")
+	}
+}
+
+// TestNewSentinel_MixedNilParents verifies that both untyped and typed nil
+// parents are filtered, mixed with valid parents.
+func TestNewSentinel_MixedNilParents(t *testing.T) {
+	var nc *nilClassified
+	valid := errx.NewSentinel("valid")
+
+	s := errx.NewSentinel("child", nil, nc, valid)
+	if s == nil {
+		t.Fatal("expected non-nil sentinel")
+	}
+
+	// Valid parent still matches.
+	if !errors.Is(s, valid) {
+		t.Error("expected child to match valid parent")
+	}
+}
+
+// TestWrap_FilteredButPreservesValidClassifications verifies that valid
+// classifications mixed in with nil ones still work.
+func TestWrap_FilteredButPreservesValidClassifications(t *testing.T) {
+	var nc *nilClassified
+	tag := errx.NewSentinel("tag")
+	baseErr := errors.New("base")
+
+	wrapped := errx.Wrap("ctx", baseErr, nil, nc, tag)
+	if !errors.Is(wrapped, tag) {
+		t.Error("expected wrapped to match tag even with nil siblings")
+	}
+}
+
 // TestCarrier_AsMethod_WithSentinel tests As() with sentinel types
 func TestCarrier_AsMethod_WithSentinel(t *testing.T) {
 	tag := errx.NewSentinel("tag")

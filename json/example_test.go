@@ -160,20 +160,25 @@ func Example_attributedError() {
 	//       "key": "resource",
 	//       "value": "account"
 	//     }
-	//   ],
-	//   "cause": {
-	//     "message": "operation failed"
-	//   }
+	//   ]
 	// }
 }
 
-// Example_complexError demonstrates serializing errors with all features
+// Example_complexError demonstrates serializing errors with all features.
+//
+// Note: DisplayText, Attributes, and StackTrace bubble up the chain so the
+// top level reflects everything present anywhere below. Sentinels, by
+// contrast, are level-scoped: a classification attached at an inner level
+// is reported at that inner level, not the top.
 func Example_complexError() {
 	// Build a rich error with all features
 	baseErr := errors.New("connection timeout")
 	displayErr := errx.NewDisplayable("Service temporarily unavailable")
 	attrErr := errx.Attrs("retry_count", 3, "host", "localhost")
 
+	// All classifications here (displayErr, attrErr, ErrDatabase) are
+	// attached to baseErr via the same stacktrace.Wrap call, so they
+	// surface together at the top level.
 	err := stacktrace.Wrap("database query failed",
 		baseErr, displayErr, attrErr, ErrDatabase)
 
@@ -237,10 +242,6 @@ func Example_apiResponse() {
 	//       "key": "user_id",
 	//       "value": "12345"
 	//     }
-	//   ],
-	//   "cause": {
-	//     "message": "User not found",
-	//     "display_text": "User not found"
-	//   }
+	//   ]
 	// }
 }
