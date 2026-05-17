@@ -74,6 +74,25 @@ type config struct {
 	maxDepth              int
 	maxStackFrames        int
 	includeStandardErrors bool
+
+	// Opt-in toggles for serialized sections. All default to true so that the
+	// out-of-the-box JSON output matches the pre-1.3 behavior; setting any to
+	// false suppresses that section in the output.
+	includeStackTrace bool
+	includeAttributes bool
+	includeSentinels  bool
+
+	// attributeValueTransformer, when non-nil, may rewrite/redact attribute
+	// values just before they are placed into the serialized output.
+	attributeValueTransformer AttributeValueTransformer
+
+	// stackTraceTrimPath, when non-empty, is stripped (prefix match) from each
+	// stack frame's File field.
+	stackTraceTrimPath string
+
+	// maxMessageBytes, when > 0, truncates each serialized error's Message to
+	// at most that many bytes (with a "...(truncated)" suffix).
+	maxMessageBytes int
 }
 
 // defaultConfig returns the default configuration.
@@ -82,6 +101,9 @@ func defaultConfig() *config {
 		maxDepth:              32,
 		maxStackFrames:        32,
 		includeStandardErrors: true,
+		includeStackTrace:     true,
+		includeAttributes:     true,
+		includeSentinels:      true,
 	}
 }
 
@@ -176,7 +198,7 @@ func toSerializedError(err error, cfg *config, visited map[uintptr]bool, depth i
 	}
 
 	result := &SerializedError{
-		Message: err.Error(),
+		Message: truncateMessage(err.Error(), cfg.maxMessageBytes),
 	}
 
 	// Extract displayable text
@@ -185,13 +207,19 @@ func toSerializedError(err error, cfg *config, visited map[uintptr]bool, depth i
 	}
 
 	// Extract sentinels - only from this error level, not the whole chain
-	result.Sentinels = extractSentinelsFromError(err)
+	if cfg.includeSentinels {
+		result.Sentinels = extractSentinelsFromError(err)
+	}
 
 	// Extract attributes
-	serializeAttributes(err, result)
+	if cfg.includeAttributes {
+		serializeAttributes(err, cfg, result)
+	}
 
 	// Extract stack trace
-	serializeStackTrace(err, cfg, result)
+	if cfg.includeStackTrace {
+		serializeStackTrace(err, cfg, result)
+	}
 
 	// Handle unwrapping
 	serializeCauses(err, cfg, visited, depth, result)
@@ -199,17 +227,22 @@ func toSerializedError(err error, cfg *config, visited map[uintptr]bool, depth i
 	return result
 }
 
-// serializeAttributes extracts and serializes attributes from an error.
-func serializeAttributes(err error, result *SerializedError) {
+// serializeAttributes extracts and serializes attributes from an error,
+// applying the configured attribute value transformer (if any).
+func serializeAttributes(err error, cfg *config, result *SerializedError) {
 	attrs := errx.ExtractAttrs(err)
 	if len(attrs) == 0 {
 		return
 	}
 	result.Attributes = make([]SerializedAttr, len(attrs))
 	for i, attr := range attrs {
+		value := attr.Value
+		if cfg.attributeValueTransformer != nil {
+			value = cfg.attributeValueTransformer(attr.Key, value)
+		}
 		result.Attributes[i] = SerializedAttr{
 			Key:   attr.Key,
-			Value: attr.Value,
+			Value: value,
 		}
 	}
 }
@@ -227,7 +260,7 @@ func serializeStackTrace(err error, cfg *config, result *SerializedError) {
 	result.StackTrace = make([]SerializedFrame, limit)
 	for i := 0; i < limit; i++ {
 		result.StackTrace[i] = SerializedFrame{
-			File:     frames[i].File,
+			File:     trimStackPath(frames[i].File, cfg.stackTraceTrimPath),
 			Line:     frames[i].Line,
 			Function: frames[i].Function,
 		}

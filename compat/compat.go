@@ -83,6 +83,8 @@
 package compat
 
 import (
+	"errors"
+
 	"github.com/go-extras/errx"
 )
 
@@ -98,6 +100,22 @@ func (w *errorWrapper) Error() string {
 
 func (w *errorWrapper) Unwrap() error {
 	return w.err
+}
+
+// Is reports whether the wrapped error matches target via errors.Is. This makes
+// errorWrapper transparent to standard error matching: for example, if a caller
+// passes a sentinel `var ErrNotFound = errors.New("not found")` as a classification,
+// downstream errors.Is(returned, ErrNotFound) still works after the value has been
+// wrapped to satisfy errx.Classified.
+func (w *errorWrapper) Is(target error) bool {
+	return errors.Is(w.err, target)
+}
+
+// As delegates to errors.As on the wrapped error, so callers can extract typed
+// errors that were originally provided as classifications without having to know
+// they were silently wrapped by the compat layer.
+func (w *errorWrapper) As(target any) bool {
+	return errors.As(w.err, target)
 }
 
 func (*errorWrapper) IsClassified() bool {
@@ -119,6 +137,26 @@ func toClassified(err error) errx.Classified {
 
 	// Wrap standard error to make it Classified
 	return &errorWrapper{err: err}
+}
+
+// toClassifiedSlice converts a variadic []error into []errx.Classified,
+// skipping nil entries. It returns nil (not a zero-length slice) when the
+// input is empty or contains only nil entries, so callers avoid an
+// unnecessary allocation in the common no-classification path.
+func toClassifiedSlice(in []error) []errx.Classified {
+	if len(in) == 0 {
+		return nil
+	}
+	var out []errx.Classified
+	for _, cls := range in {
+		if c := toClassified(cls); c != nil {
+			if out == nil {
+				out = make([]errx.Classified, 0, len(in))
+			}
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // Wrap wraps an error with additional context text and optional classifications.
@@ -148,15 +186,7 @@ func Wrap(text string, cause error, classifications ...error) error {
 		return nil
 	}
 
-	// Convert error classifications to Classified
-	classified := make([]errx.Classified, 0, len(classifications))
-	for _, cls := range classifications {
-		if c := toClassified(cls); c != nil {
-			classified = append(classified, c)
-		}
-	}
-
-	return errx.Wrap(text, cause, classified...)
+	return errx.Wrap(text, cause, toClassifiedSlice(classifications)...)
 }
 
 // Classify attaches one or more classifications to an existing error without adding
@@ -185,15 +215,7 @@ func Classify(cause error, classifications ...error) error {
 		return nil
 	}
 
-	// Convert error classifications to Classified
-	classified := make([]errx.Classified, 0, len(classifications))
-	for _, cls := range classifications {
-		if c := toClassified(cls); c != nil {
-			classified = append(classified, c)
-		}
-	}
-
-	return errx.Classify(cause, classified...)
+	return errx.Classify(cause, toClassifiedSlice(classifications)...)
 }
 
 // ClassifyNew creates a new error with the given text and immediately classifies it
@@ -222,13 +244,5 @@ func Classify(cause error, classifications ...error) error {
 //	fmt.Println(errors.Is(err, ErrNotFound))        // Output: true
 //	fmt.Println(errors.Is(err, ErrDatabase))        // Output: true
 func ClassifyNew(text string, classifications ...error) error {
-	// Convert error classifications to Classified
-	classified := make([]errx.Classified, 0, len(classifications))
-	for _, cls := range classifications {
-		if c := toClassified(cls); c != nil {
-			classified = append(classified, c)
-		}
-	}
-
-	return errx.ClassifyNew(text, classified...)
+	return errx.ClassifyNew(text, toClassifiedSlice(classifications)...)
 }

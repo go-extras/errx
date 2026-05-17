@@ -288,6 +288,12 @@ func classify(cause error, classifications ...Classified) error {
 	if cause == nil {
 		return nil
 	}
+	// Symmetric short-circuit with Wrap: avoid wrapping in a no-op carrier
+	// when there are no classifications to attach. The cause is returned
+	// unchanged so errors.Is(returned, cause) holds via identity.
+	if len(classifications) == 0 {
+		return cause
+	}
 	return &carrier{classifications: classifications, cause: cause}
 }
 

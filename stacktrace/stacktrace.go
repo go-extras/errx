@@ -150,8 +150,14 @@ func Wrap(text string, cause error, classifications ...errx.Classified) error {
 	}
 	// Capture stack with skip=2 to skip Wrap() and runtime.Callers
 	trace := captureStack(2)
-	classifications = append(classifications, trace)
-	return errx.Wrap(text, cause, classifications...)
+	// Defensive copy: appending to the caller's variadic slice can mutate the
+	// caller's backing array when they spread a slice with spare capacity
+	// (e.g. `cls := make([]errx.Classified, 0, 4); cls = append(cls, c1); stacktrace.Wrap("x", base, cls...)`).
+	// Allocating a fresh slice avoids that aliasing entirely.
+	ncls := make([]errx.Classified, len(classifications)+1)
+	copy(ncls, classifications)
+	ncls[len(classifications)] = trace
+	return errx.Wrap(text, cause, ncls...)
 }
 
 // Classify attaches one or more classifications to an error, automatically
@@ -172,8 +178,11 @@ func Classify(cause error, classifications ...errx.Classified) error {
 	}
 	// Capture stack with skip=2 to skip Classify() and runtime.Callers
 	trace := captureStack(2)
-	classifications = append(classifications, trace)
-	return errx.Classify(cause, classifications...)
+	// Defensive copy — see comment on Wrap for the aliasing scenario this avoids.
+	ncls := make([]errx.Classified, len(classifications)+1)
+	copy(ncls, classifications)
+	ncls[len(classifications)] = trace
+	return errx.Classify(cause, ncls...)
 }
 
 // ClassifyNew creates a new error with the given text and immediately classifies it
@@ -203,6 +212,9 @@ func Classify(cause error, classifications ...errx.Classified) error {
 func ClassifyNew(text string, classifications ...errx.Classified) error {
 	// Capture stack with skip=2 to skip ClassifyNew() and runtime.Callers
 	trace := captureStack(2)
-	classifications = append(classifications, trace)
-	return errx.ClassifyNew(text, classifications...)
+	// Defensive copy — see comment on Wrap for the aliasing scenario this avoids.
+	ncls := make([]errx.Classified, len(classifications)+1)
+	copy(ncls, classifications)
+	ncls[len(classifications)] = trace
+	return errx.ClassifyNew(text, ncls...)
 }
