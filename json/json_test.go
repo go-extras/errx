@@ -228,7 +228,10 @@ func TestMarshal_ComplexError(t *testing.T) {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
 
-	// Verify all components are present
+	// Verify all components are present.
+	//
+	// DisplayText, Attributes, and StackTrace are chain-wide: the top level
+	// reflects what is present anywhere in the chain.
 	if result.DisplayText != "Service temporarily unavailable" {
 		t.Errorf("DisplayText = %q, want %q", result.DisplayText, "Service temporarily unavailable")
 	}
@@ -238,8 +241,25 @@ func TestMarshal_ComplexError(t *testing.T) {
 	if len(result.StackTrace) == 0 {
 		t.Error("StackTrace is empty")
 	}
-	if len(result.Sentinels) == 0 {
-		t.Error("Sentinels is empty")
+
+	// Sentinels are level-scoped (see issue #14, bug 3). The ErrTimeoutTest
+	// classification was attached at the inner errx.Classify call, so it
+	// surfaces at the cause level — not at the top stacktrace.Wrap level,
+	// whose only classification is the trace itself.
+	if len(result.Sentinels) != 0 {
+		t.Errorf("top-level Sentinels = %v, want empty (sentinel attached at inner level)", result.Sentinels)
+	}
+	if result.Cause == nil {
+		t.Fatal("Cause is nil; sentinel should be reported at this level")
+	}
+	gotTimeout := false
+	for _, s := range result.Cause.Sentinels {
+		if s == "timeout" {
+			gotTimeout = true
+		}
+	}
+	if !gotTimeout {
+		t.Errorf("Cause.Sentinels = %v, want to contain \"timeout\"", result.Cause.Sentinels)
 	}
 }
 
@@ -653,7 +673,15 @@ func TestMarshal_PointerIdentity(t *testing.T) {
 }
 
 // TestMarshal_SamePointerMultipleTimes verifies that the same error instance
-// appearing multiple times in the error tree is handled correctly by circular detection.
+// appearing in multiple sibling branches is serialized fully in each branch.
+//
+// History: this test previously asserted that the second branch's cause was
+// rendered as "(circular reference)" because the visited set was threaded
+// across all branches. That codified the bug fixed in issue #14 (bug 2):
+// shared-cause / diamond patterns being misclassified as cycles. After the
+// fix, visited tracking is per-path (push on entry, pop on exit), so each
+// branch in a multi-error gets an independent view and a pointer that
+// legitimately appears in a sibling is serialized normally.
 func TestMarshal_SamePointerMultipleTimes(t *testing.T) {
 	baseErr := &unhashableError{
 		message: "shared error",
@@ -690,30 +718,19 @@ func TestMarshal_SamePointerMultipleTimes(t *testing.T) {
 		t.Fatalf("len(Causes) = %d, want 2", len(result.Causes))
 	}
 
-	// First wrapper should be fully serialized
-	if result.Causes[0].Message != "first occurrence: shared error" {
-		t.Errorf("Causes[0].Message = %q, want %q", result.Causes[0].Message, "first occurrence: shared error")
-	}
-	// First wrapper should have the base error as its cause
-	if result.Causes[0].Cause == nil {
-		t.Fatal("Causes[0].Cause should not be nil")
-	}
-	if result.Causes[0].Cause.Message != "shared error" {
-		t.Errorf("Causes[0].Cause.Message = %q, want %q", result.Causes[0].Cause.Message, "shared error")
-	}
-
-	// Second wrapper should also be serialized
-	if result.Causes[1].Message != "second occurrence: shared error" {
-		t.Errorf("Causes[1].Message = %q, want %q", result.Causes[1].Message, "second occurrence: shared error")
-	}
-	// Second wrapper's cause should be marked as circular reference
-	// because baseErr was already visited when processing the first branch
-	if result.Causes[1].Cause == nil {
-		t.Fatal("Causes[1].Cause should not be nil")
-	}
-	if result.Causes[1].Cause.Message != "(circular reference)" {
-		t.Errorf("Causes[1].Cause.Message = %q, want %q (circular reference detected)",
-			result.Causes[1].Cause.Message, "(circular reference)")
+	// Both branches should serialize fully and identically — the shared
+	// pointer in the second branch must not be flagged circular.
+	for i, want := range []string{"first occurrence: shared error", "second occurrence: shared error"} {
+		if result.Causes[i].Message != want {
+			t.Errorf("Causes[%d].Message = %q, want %q", i, result.Causes[i].Message, want)
+		}
+		if result.Causes[i].Cause == nil {
+			t.Fatalf("Causes[%d].Cause should not be nil", i)
+		}
+		if result.Causes[i].Cause.Message != "shared error" {
+			t.Errorf("Causes[%d].Cause.Message = %q, want %q (DAG sharing must not be flagged circular)",
+				i, result.Causes[i].Cause.Message, "shared error")
+		}
 	}
 }
 
