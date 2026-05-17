@@ -26,12 +26,22 @@ func (a Attr) String() string {
 type AttrList []Attr
 
 // String returns a string representation of the AttrList slice.
+// The output format is "key1=val1 key2=val2 ..." (each Attr formatted via Attr.String).
 func (al AttrList) String() string {
-	parts := make([]string, 0, len(al))
-	for _, attr := range al {
-		parts = append(parts, attr.String())
+	if len(al) == 0 {
+		return ""
 	}
-	return strings.Join(parts, " ")
+
+	// Estimate capacity: roughly len("key=value ") per attr, ~16 bytes is a reasonable hint.
+	var b strings.Builder
+	b.Grow(len(al) * 16)
+	for i, attr := range al {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		fmt.Fprintf(&b, "%s=%+v", attr.Key, attr.Value)
+	}
+	return b.String()
 }
 
 // ToSlogAttrs converts errx.AttrList to []slog.Attr for use with slog.Logger.LogAttrs.
@@ -83,6 +93,31 @@ func (al AttrList) ToSlogArgs() []any {
 	return result
 }
 
+// ToKVArgs converts errx.AttrList to a flat []any of alternating keys and values:
+// [key1, val1, key2, val2, ...]. This is the form expected by many non-slog logging
+// libraries — for example zap's SugaredLogger Errorw/Infow, logrus' WithFields-style
+// helpers via positional pairs, and similar key/value sinks.
+//
+// For slog use, prefer ToSlogAttrs (with Logger.LogAttrs) or ToSlogArgs.
+//
+// Example:
+//
+//	err := errx.Attrs("user_id", 123, "action", "delete")
+//	attrs := errx.ExtractAttrs(err)
+//	// zap SugaredLogger:
+//	sugar.Errorw("operation failed", attrs.ToKVArgs()...)
+func (al AttrList) ToKVArgs() []any {
+	if len(al) == 0 {
+		return nil
+	}
+
+	out := make([]any, 0, 2*len(al))
+	for _, a := range al {
+		out = append(out, a.Key, a.Value)
+	}
+	return out
+}
+
 // Attrs creates an error with structured attributes for additional context.
 // Attributes can be extracted later using ExtractAttrs.
 //
@@ -120,6 +155,30 @@ func (al AttrList) ToSlogArgs() []any {
 // The "!BADKEY" key is used for malformed arguments to help identify issues during debugging.
 // This behavior matches the slog package's handling of malformed key-value pairs.
 //
+// # The "All-Strings Drift" Pitfall
+//
+// WARNING: Because the key-value parser walks the argument list two at a time, sequences of
+// all-string arguments can silently drift into "!BADKEY" output if you forget a value or
+// accidentally pass an odd number of strings. For example:
+//
+//	// Looks like three independent strings, parses as one pair + one !BADKEY:
+//	errx.Attrs("user_id", "action", "delete")
+//	// → []Attr{
+//	//     {Key: "user_id", Value: "action"},   // "action" was treated as user_id's value
+//	//     {Key: "!BADKEY", Value: "delete"},   // odd-one-out
+//	//   }
+//
+//	// Likely intended:
+//	errx.Attrs("user_id", userID, "action", "delete")
+//	// → []Attr{{user_id, <id>}, {action, delete}}
+//
+// If you want compile-time safety, use the typed form:
+//
+//	errx.Attrs(
+//	    errx.Attr{Key: "user_id", Value: userID},
+//	    errx.Attr{Key: "action",  Value: "delete"},
+//	)
+//
 // Examples:
 //
 //	Attrs("key", "value")                    // Normal key-value pair
@@ -137,7 +196,24 @@ func Attrs(attrs ...any) Classified {
 
 // WithAttrs creates an error with structured attributes.
 //
-// Deprecated: Use Attrs instead.
+// Deprecated: WithAttrs has been renamed since v1.1.0 — use [Attrs] instead. The
+// new name is shorter, aligns with how the function is typically called, and matches
+// the AttrList type rename in the same release. The two functions are equivalent and
+// WithAttrs continues to work for backward compatibility, but it will be removed in
+// a future major release. To migrate, simply rename the call:
+//
+//	// Before (deprecated):
+//	attrErr := errx.WithAttrs("user_id", 123, "action", "delete")
+//
+//	// After (recommended):
+//	attrErr := errx.Attrs("user_id", 123, "action", "delete")
+//
+// This deprecation is picked up by staticcheck (SA1019). For a project-wide migration,
+// run `go fix ./...` (Go 1.24+): the //go:fix inline directive below tells gopls and
+// `go fix` to inline every call site, rewriting `errx.WithAttrs(...)` to `errx.Attrs(...)`
+// automatically.
+//
+//go:fix inline
 func WithAttrs(attrs ...any) Classified {
 	return Attrs(attrs...)
 }

@@ -75,6 +75,25 @@ type config struct {
 	maxDepth              int
 	maxStackFrames        int
 	includeStandardErrors bool
+
+	// Opt-in toggles for serialized sections. All default to true so that the
+	// out-of-the-box JSON output matches the pre-1.3 behavior; setting any to
+	// false suppresses that section in the output.
+	includeStackTrace bool
+	includeAttributes bool
+	includeSentinels  bool
+
+	// attributeValueTransformer, when non-nil, may rewrite/redact attribute
+	// values just before they are placed into the serialized output.
+	attributeValueTransformer AttributeValueTransformer
+
+	// stackTraceTrimPath, when non-empty, is stripped (prefix match) from each
+	// stack frame's File field.
+	stackTraceTrimPath string
+
+	// maxMessageBytes, when > 0, truncates each serialized error's Message to
+	// at most that many bytes (with a "...(truncated)" suffix).
+	maxMessageBytes int
 }
 
 // defaultConfig returns the default configuration.
@@ -83,6 +102,9 @@ func defaultConfig() *config {
 		maxDepth:              32,
 		maxStackFrames:        32,
 		includeStandardErrors: true,
+		includeStackTrace:     true,
+		includeAttributes:     true,
+		includeSentinels:      true,
 	}
 }
 
@@ -190,7 +212,7 @@ func toSerializedError(err error, cfg *config, visited visitedSet, depth int) *S
 	}
 
 	result := &SerializedError{
-		Message: node.Error(),
+		Message: truncateMessage(node.Error(), cfg.maxMessageBytes),
 	}
 
 	// For the chain-wide extractors we pass the original err (rather than
@@ -207,15 +229,21 @@ func toSerializedError(err error, cfg *config, visited visitedSet, depth int) *S
 
 	// Sentinels: level-scoped. Only this level's absorbed carrier
 	// classifications and the node itself (if it's a pure sentinel) count.
-	result.Sentinels = sentinelsForLevel(levelCls, node)
+	if cfg.includeSentinels {
+		result.Sentinels = sentinelsForLevel(levelCls, node)
+	}
 
 	// Attributes: chain-wide (errx.ExtractAttrs walks the chain).
 	// Per-value JSON-serializability is validated to keep one bad value
 	// from aborting the whole marshal.
-	serializeAttributes(err, result)
+	if cfg.includeAttributes {
+		serializeAttributes(err, cfg, result)
+	}
 
 	// Stack trace: chain-wide.
-	serializeStackTrace(err, cfg, result)
+	if cfg.includeStackTrace {
+		serializeStackTrace(err, cfg, result)
+	}
 
 	// Cause(s).
 	serializeCauses(node, nextCause, cfg, visited, depth, result)
@@ -287,8 +315,10 @@ func sentinelsForLevel(classifications []errx.Classified, node error) []string {
 // serializeAttributes extracts and serializes attributes from an error.
 // Attribute values whose JSON encoding fails (e.g. a func() value) are
 // replaced with a fmt.Sprintf("%+v", v) fallback string so a single bad
-// value does not abort the entire marshal.
-func serializeAttributes(err error, result *SerializedError) {
+// value does not abort the entire marshal. If a non-nil
+// AttributeValueTransformer is configured, it is applied to each value
+// before the JSON-serializability check.
+func serializeAttributes(err error, cfg *config, result *SerializedError) {
 	attrs := errx.ExtractAttrs(err)
 	if len(attrs) == 0 {
 		return
@@ -296,8 +326,11 @@ func serializeAttributes(err error, result *SerializedError) {
 	result.Attributes = make([]SerializedAttr, len(attrs))
 	for i, attr := range attrs {
 		value := attr.Value
+		if cfg.attributeValueTransformer != nil {
+			value = cfg.attributeValueTransformer(attr.Key, value)
+		}
 		if !isJSONSerializable(value) {
-			value = fmt.Sprintf("%+v", attr.Value)
+			value = fmt.Sprintf("%+v", value)
 		}
 		result.Attributes[i] = SerializedAttr{
 			Key:   attr.Key,
@@ -330,7 +363,7 @@ func serializeStackTrace(err error, cfg *config, result *SerializedError) {
 	result.StackTrace = make([]SerializedFrame, limit)
 	for i := 0; i < limit; i++ {
 		result.StackTrace[i] = SerializedFrame{
-			File:     frames[i].File,
+			File:     trimStackPath(frames[i].File, cfg.stackTraceTrimPath),
 			Line:     frames[i].Line,
 			Function: frames[i].Function,
 		}
