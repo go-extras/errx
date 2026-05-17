@@ -209,8 +209,11 @@ func Attrs(attrs ...any) Classified {
 //	attrErr := errx.Attrs("user_id", 123, "action", "delete")
 //
 // This deprecation is picked up by staticcheck (SA1019). For a project-wide migration,
-// `grep -rn "errx.WithAttrs"` followed by sed/IDE refactor is sufficient — the signature
-// is unchanged.
+// run `go fix ./...` (Go 1.24+): the //go:fix inline directive below tells gopls and
+// `go fix` to inline every call site, rewriting `errx.WithAttrs(...)` to `errx.Attrs(...)`
+// automatically.
+//
+//go:fix inline
 func WithAttrs(attrs ...any) Classified {
 	return Attrs(attrs...)
 }
