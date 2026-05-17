@@ -81,16 +81,24 @@ func TestDisplayText_WithDeepChain(t *testing.T) {
 }
 
 func TestDisplayText_WithMultipleDisplayables(t *testing.T) {
-	displayErr1 := errx.NewDisplayable("first user error")
-	displayErr2 := errx.NewDisplayable("second user error")
-	wrapped := fmt.Errorf("level1: %w", displayErr2)
-	final := fmt.Errorf("level2: %w: also %w", wrapped, displayErr1)
+	// Build a deterministic single-path chain so we can pin exactly which
+	// displayable wins. errors.As walks the chain depth-first from the head,
+	// so the displayable closest to the head of the chain (the INNER one
+	// here, since it was wrapped first) is the one returned by DisplayText.
+	inner := errx.NewDisplayable("inner user error")
+	outer := errx.NewDisplayable("outer user error")
+
+	mid := fmt.Errorf("mid ctx: %w", inner)
+	// Wrapping with an additional displayable as a classification still
+	// places `outer` deeper in the As() traversal than `inner`, because
+	// carrier.As tries the cause chain first.
+	final := errx.Classify(mid, outer)
 
 	text := errx.DisplayText(final)
 
-	// Should return the first one found in the chain
-	if text == "" {
-		t.Error("expected non-empty displayable message")
+	if text != "inner user error" {
+		t.Errorf("DisplayText returned %q; want %q (innermost displayable wins via cause-first As traversal)",
+			text, "inner user error")
 	}
 }
 
