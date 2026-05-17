@@ -393,32 +393,7 @@ func TestWithIncludeStandardErrors_True(t *testing.T) {
 	}
 }
 
-func TestMultiError(t *testing.T) {
-	// Create a multi-error (errors that unwrap to []error)
-	type multiError struct {
-		errs []error
-	}
-
-	me := &multiError{
-		errs: []error{
-			errors.New("error 1"),
-			errors.New("error 2"),
-			errors.New("error 3"),
-		},
-	}
-
-	// Implement Unwrap() []error
-	type unwrapper interface {
-		Unwrap() []error
-	}
-
-	if _, ok := any(me).(unwrapper); !ok {
-		// Need to add method
-		t.Skip("Need to implement Unwrap() []error for test")
-	}
-}
-
-// multiError implements Unwrap() []error for testing
+// testMultiError implements Unwrap() []error for testing.
 type testMultiError struct {
 	message string
 	errs    []error
@@ -597,50 +572,91 @@ func TestMarshal_UnhashableErrorChain(t *testing.T) {
 }
 
 func TestMarshal_MixedHashableUnhashable(t *testing.T) {
-	// Test a chain with both hashable and unhashable errors
+	// Build a chain that interleaves hashable and unhashable errors so the
+	// resulting SerializedError shape can be pinned in full.
 	hashableErr := errors.New("hashable error")
 	unhashableErr := &unhashableError{
 		message: "unhashable error",
 		data:    map[string]any{"key": "value"},
 	}
 
-	// Create a chain with mixed hashable/unhashable errors
-	err1 := errx.Wrap("wrap1", hashableErr, ErrDatabaseTest)
+	// finalErr shape (top -> base):
+	//   stacktrace.Wrap("final", stacktrace.Wrap("wrap3", errx.Wrap("wrap2", unhashableErr)))
 	err2 := errx.Wrap("wrap2", unhashableErr)
 	err3 := stacktrace.Wrap("wrap3", err2)
 	finalErr := stacktrace.Wrap("final", err3)
-	// Also wrap the first error separately
-	anotherErr := errx.Wrap("another", err1)
 
-	// Should handle mixed hashable/unhashable errors
 	data, err := errxjson.Marshal(finalErr)
 	if err != nil {
-		t.Fatalf("Marshal error: %v", err)
+		t.Fatalf("Marshal finalErr error: %v", err)
 	}
 
 	var result errxjson.SerializedError
 	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("Unmarshal error: %v", err)
+		t.Fatalf("Unmarshal finalErr error: %v", err)
 	}
 
-	// Verify it serialized successfully
-	if result.Message == "" {
-		t.Error("Message should not be empty")
+	wantMsg := "final: wrap3: wrap2: unhashable error"
+	if result.Message != wantMsg {
+		t.Errorf("finalErr.Message = %q, want %q", result.Message, wantMsg)
+	}
+	if len(result.StackTrace) == 0 {
+		t.Error("finalErr should have a stack trace from the outer stacktrace.Wrap")
+	}
+	// Walk the cause chain; we must reach a frame whose Message is the inner
+	// unhashable error message and verify no panic occurred along the way.
+	foundUnhashable := false
+	for cur := result.Cause; cur != nil; cur = cur.Cause {
+		if cur.Message == "unhashable error" {
+			foundUnhashable = true
+			break
+		}
+	}
+	if !foundUnhashable {
+		t.Errorf("expected to find 'unhashable error' in cause chain; got chain rooted at %q", result.Message)
 	}
 
-	// Also test the other error
+	// Now do the same for the hashable-only branch.
+	err1 := errx.Wrap("wrap1", hashableErr, ErrDatabaseTest)
+	anotherErr := errx.Wrap("another", err1)
+
 	data2, err := errxjson.Marshal(anotherErr)
 	if err != nil {
-		t.Fatalf("Marshal error for anotherErr: %v", err)
+		t.Fatalf("Marshal anotherErr error: %v", err)
 	}
 
 	var result2 errxjson.SerializedError
 	if err := json.Unmarshal(data2, &result2); err != nil {
-		t.Fatalf("Unmarshal error for anotherErr: %v", err)
+		t.Fatalf("Unmarshal anotherErr error: %v", err)
 	}
 
-	if result2.Message == "" {
-		t.Error("Message should not be empty")
+	wantMsg2 := "another: wrap1: hashable error"
+	if result2.Message != wantMsg2 {
+		t.Errorf("anotherErr.Message = %q, want %q", result2.Message, wantMsg2)
+	}
+	// The "database" sentinel attached at wrap1 should surface in the chain.
+	foundDB := false
+	for cur := &result2; cur != nil; cur = cur.Cause {
+		for _, s := range cur.Sentinels {
+			if s == "database" {
+				foundDB = true
+				break
+			}
+		}
+		if foundDB {
+			break
+		}
+	}
+	if !foundDB {
+		t.Error("expected to find 'database' sentinel in serialized chain for anotherErr")
+	}
+	// Verify the inner-most cause is the hashable base error.
+	leaf := &result2
+	for leaf.Cause != nil {
+		leaf = leaf.Cause
+	}
+	if leaf.Message != "hashable error" {
+		t.Errorf("anotherErr leaf message = %q, want %q", leaf.Message, "hashable error")
 	}
 }
 

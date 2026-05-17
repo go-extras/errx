@@ -688,12 +688,17 @@ func TestHasAttrs_WithMultiError(t *testing.T) {
 	}
 }
 
-func TestAttrs_ToSlogAttrs(t *testing.T) {
-	tests := []struct {
-		name     string
-		attrs    errx.AttrList
-		expected []slog.Attr
-	}{
+// attrTestCase is the shared table for ToSlogAttrs / ToSlogArgs tests. Both
+// methods are expected to yield equivalent slog.Attr values from the same
+// input, so we keep the cases in one place to avoid drift.
+type attrTestCase struct {
+	name     string
+	attrs    errx.AttrList
+	expected []slog.Attr
+}
+
+func attrTestCases() []attrTestCase {
+	return []attrTestCase{
 		{
 			name: "basic conversion",
 			attrs: errx.AttrList{
@@ -731,8 +736,10 @@ func TestAttrs_ToSlogAttrs(t *testing.T) {
 			expected: nil,
 		},
 	}
+}
 
-	for _, tt := range tests {
+func TestAttrs_ToSlogAttrs(t *testing.T) {
+	for _, tt := range attrTestCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.attrs.ToSlogAttrs()
 
@@ -782,50 +789,7 @@ func TestAttrs_ToSlogAttrs_Integration(t *testing.T) {
 }
 
 func TestAttrs_ToSlogArgs(t *testing.T) {
-	tests := []struct {
-		name     string
-		attrs    errx.AttrList
-		expected []any
-	}{
-		{
-			name: "basic conversion",
-			attrs: errx.AttrList{
-				{Key: "user_id", Value: 123},
-				{Key: "action", Value: "delete"},
-			},
-			expected: []any{
-				slog.Any("user_id", 123),
-				slog.Any("action", "delete"),
-			},
-		},
-		{
-			name: "mixed types",
-			attrs: errx.AttrList{
-				{Key: "string", Value: "test"},
-				{Key: "int", Value: 42},
-				{Key: "bool", Value: true},
-				{Key: "float", Value: 3.14},
-			},
-			expected: []any{
-				slog.Any("string", "test"),
-				slog.Any("int", 42),
-				slog.Any("bool", true),
-				slog.Any("float", 3.14),
-			},
-		},
-		{
-			name:     "empty attrs",
-			attrs:    errx.AttrList{},
-			expected: nil,
-		},
-		{
-			name:     "nil attrs",
-			attrs:    nil,
-			expected: nil,
-		},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range attrTestCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.attrs.ToSlogArgs()
 
@@ -841,17 +805,13 @@ func TestAttrs_ToSlogArgs(t *testing.T) {
 			}
 
 			for i := range result {
-				// Convert both to slog.Attr for comparison
-				resultAttr, ok1 := result[i].(slog.Attr)
-				expectedAttr, ok2 := tt.expected[i].(slog.Attr)
-
-				if !ok1 || !ok2 {
-					t.Errorf("arg %d: expected slog.Attr, got %T and %T", i, result[i], tt.expected[i])
+				resultAttr, ok := result[i].(slog.Attr)
+				if !ok {
+					t.Errorf("arg %d: expected slog.Attr, got %T", i, result[i])
 					continue
 				}
-
-				if !resultAttr.Equal(expectedAttr) {
-					t.Errorf("arg %d: expected %v, got %v", i, expectedAttr, resultAttr)
+				if !resultAttr.Equal(tt.expected[i]) {
+					t.Errorf("arg %d: expected %v, got %v", i, tt.expected[i], resultAttr)
 				}
 			}
 		})
