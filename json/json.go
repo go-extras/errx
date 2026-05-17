@@ -23,7 +23,6 @@ package json
 import (
 	"encoding/json"
 	"errors"
-	"reflect"
 
 	"github.com/go-extras/errx"
 	"github.com/go-extras/errx/internal/errptr"
@@ -69,16 +68,17 @@ type SerializedFrame struct {
 	Function string `json:"function"`
 }
 
-// config holds serialization configuration.
+// config holds serialization configuration. It is small enough to be passed
+// by value so callers avoid an unnecessary heap allocation per Marshal call.
 type config struct {
 	maxDepth              int
 	maxStackFrames        int
 	includeStandardErrors bool
 }
 
-// defaultConfig returns the default configuration.
-func defaultConfig() *config {
-	return &config{
+// defaultConfig returns the default configuration as a value (no allocation).
+func defaultConfig() config {
+	return config{
 		maxDepth:              32,
 		maxStackFrames:        32,
 		includeStandardErrors: true,
@@ -99,11 +99,13 @@ func Marshal(err error, opts ...Option) ([]byte, error) {
 
 	cfg := defaultConfig()
 	for _, opt := range opts {
-		opt(cfg)
+		opt(&cfg)
 	}
 
-	visited := make(map[uintptr]bool)
-	serialized := toSerializedError(err, cfg, visited, 0)
+	// visited is lazily allocated on the first recursion; single-node errors
+	// never trigger the allocation.
+	var visited map[uintptr]bool
+	serialized := toSerializedError(err, &cfg, &visited, 0)
 	return json.Marshal(serialized)
 }
 
@@ -120,11 +122,11 @@ func MarshalIndent(err error, prefix, indent string, opts ...Option) ([]byte, er
 
 	cfg := defaultConfig()
 	for _, opt := range opts {
-		opt(cfg)
+		opt(&cfg)
 	}
 
-	visited := make(map[uintptr]bool)
-	serialized := toSerializedError(err, cfg, visited, 0)
+	var visited map[uintptr]bool
+	serialized := toSerializedError(err, &cfg, &visited, 0)
 	return json.MarshalIndent(serialized, prefix, indent)
 }
 
@@ -144,35 +146,47 @@ func ToSerializedError(err error, opts ...Option) *SerializedError {
 
 	cfg := defaultConfig()
 	for _, opt := range opts {
-		opt(cfg)
+		opt(&cfg)
 	}
 
-	visited := make(map[uintptr]bool)
-	return toSerializedError(err, cfg, visited, 0)
+	var visited map[uintptr]bool
+	return toSerializedError(err, &cfg, &visited, 0)
+}
+
+// markVisited records err's pointer identity in the visited set, allocating
+// the set lazily on first use. It returns true if err was already seen.
+func markVisited(err error, visited *map[uintptr]bool) bool {
+	ptr := errptr.Get(err)
+	if *visited == nil {
+		*visited = map[uintptr]bool{ptr: true}
+		return false
+	}
+	if (*visited)[ptr] {
+		return true
+	}
+	(*visited)[ptr] = true
+	return false
 }
 
 // toSerializedError recursively converts an error to SerializedError.
-func toSerializedError(err error, cfg *config, visited map[uintptr]bool, depth int) *SerializedError {
+func toSerializedError(err error, cfg *config, visited *map[uintptr]bool, depth int) *SerializedError {
 	if err == nil {
 		return nil
 	}
 
-	// Check depth limit
-	if depth >= cfg.maxDepth {
+	// Check depth limit. A non-positive maxDepth means "unlimited", matching
+	// WithMaxStackFrames semantics.
+	if cfg.maxDepth > 0 && depth >= cfg.maxDepth {
 		return &SerializedError{
 			Message: "(max depth reached)",
 		}
 	}
 
-	// Check for circular references
-	if err != nil {
-		ptr := errptr.Get(err)
-		if visited[ptr] {
-			return &SerializedError{
-				Message: "(circular reference)",
-			}
+	// Check for circular references.
+	if markVisited(err, visited) {
+		return &SerializedError{
+			Message: "(circular reference)",
 		}
-		visited[ptr] = true
 	}
 
 	result := &SerializedError{
@@ -234,12 +248,14 @@ func serializeStackTrace(err error, cfg *config, result *SerializedError) {
 	}
 }
 
+// unwrapper is the multi-error unwrap interface.
+type unwrapper interface {
+	Unwrap() []error
+}
+
 // serializeCauses handles unwrapping and serialization of error causes.
-func serializeCauses(err error, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
+func serializeCauses(err error, cfg *config, visited *map[uintptr]bool, depth int, result *SerializedError) {
 	// Check for multi-error first
-	type unwrapper interface {
-		Unwrap() []error
-	}
 	if u, ok := err.(unwrapper); ok {
 		serializeMultiError(u, cfg, visited, depth, result)
 		return
@@ -250,7 +266,7 @@ func serializeCauses(err error, cfg *config, visited map[uintptr]bool, depth int
 }
 
 // serializeMultiError serializes multiple error causes.
-func serializeMultiError(u unwrapper, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
+func serializeMultiError(u unwrapper, cfg *config, visited *map[uintptr]bool, depth int, result *SerializedError) {
 	unwrapped := u.Unwrap()
 	if len(unwrapped) == 0 {
 		return
@@ -267,25 +283,19 @@ func serializeMultiError(u unwrapper, cfg *config, visited map[uintptr]bool, dep
 	}
 }
 
-// unwrapper is the multi-error unwrap interface.
-type unwrapper interface {
-	Unwrap() []error
-}
-
 // serializeSingleCause serializes a single error cause.
-func serializeSingleCause(err error, cfg *config, visited map[uintptr]bool, depth int, result *SerializedError) {
+func serializeSingleCause(err error, cfg *config, visited *map[uintptr]bool, depth int, result *SerializedError) {
 	cause := errors.Unwrap(err)
 	if cause == nil {
 		return
 	}
 
-	// If the cause is a carrier, skip it and go to its inner cause
-	if isCarrier(cause) {
-		// Add the carrier to visited to prevent infinite loops
-		if cause != nil {
-			ptr := errptr.Get(cause)
-			visited[ptr] = true
-		}
+	// If the cause is a carrier, skip it and go to its inner cause. Its
+	// classifications were already harvested at the parent level by
+	// extractSentinelsFromError.
+	if _, ok := errx.CarrierClassifications(cause); ok {
+		// Add the carrier to visited to prevent infinite loops.
+		markVisited(cause, visited)
 		innerCause := errors.Unwrap(cause)
 		if innerCause != nil && (cfg.includeStandardErrors || isErrxError(innerCause)) {
 			result.Cause = toSerializedError(innerCause, cfg, visited, depth+1)
@@ -305,32 +315,50 @@ func extractSentinelsFromError(err error) []string {
 	}
 
 	var sentinels []string
-	seenSentinels := make(map[string]bool)
+	// seenSentinels is allocated lazily once we are about to record a second
+	// sentinel; in the common single-sentinel case it stays nil.
+	var seenSentinels map[string]bool
 
-	// Check if err itself is a carrier and extract its classifications
-	carrierClassifications := extractCarrierClassifications(err)
-	addPureSentinels(carrierClassifications, &sentinels, seenSentinels)
+	// Check if err itself is a carrier and extract its classifications.
+	if classifications, ok := errx.CarrierClassifications(err); ok {
+		addPureSentinels(classifications, &sentinels, &seenSentinels)
+	}
 
-	// Also check causes if they're carriers (common pattern from Wrap and stacktrace.Wrap)
-	// Look up to 2 levels deep to handle nested carriers
-	extractFromCarrierCauses(err, &sentinels, seenSentinels)
+	// Also check causes if they're carriers (common pattern from Wrap and
+	// stacktrace.Wrap). Look up to 2 levels deep to handle nested carriers.
+	extractFromCarrierCauses(err, &sentinels, &seenSentinels)
 
-	// Also check if err itself is a pure sentinel
-	addSelfAsPureSentinel(err, &sentinels, seenSentinels)
+	// Also check if err itself is a pure sentinel.
+	addSelfAsPureSentinel(err, &sentinels, &seenSentinels)
 
 	return sentinels
 }
 
+// rememberSentinel records text in the seen set, allocating it lazily on the
+// first call. It returns true if text was already present.
+func rememberSentinel(text string, seen *map[string]bool) bool {
+	if *seen == nil {
+		*seen = map[string]bool{text: true}
+		return false
+	}
+	if (*seen)[text] {
+		return true
+	}
+	(*seen)[text] = true
+	return false
+}
+
 // addPureSentinels adds pure sentinel classifications to the sentinels list.
-func addPureSentinels(classifications []errx.Classified, sentinels *[]string, seen map[string]bool) {
+func addPureSentinels(classifications []errx.Classified, sentinels *[]string, seen *map[string]bool) {
 	for _, cls := range classifications {
-		if isPureSentinel(cls) {
-			text := cls.Error()
-			if !seen[text] {
-				*sentinels = append(*sentinels, text)
-				seen[text] = true
-			}
+		if !isPureSentinel(cls) {
+			continue
 		}
+		text := cls.Error()
+		if rememberSentinel(text, seen) {
+			continue
+		}
+		*sentinels = append(*sentinels, text)
 	}
 }
 
@@ -340,21 +368,24 @@ func isPureSentinel(cls errx.Classified) bool {
 }
 
 // extractFromCarrierCauses extracts sentinels from carrier causes up to 2 levels deep.
-func extractFromCarrierCauses(err error, sentinels *[]string, seen map[string]bool) {
+func extractFromCarrierCauses(err error, sentinels *[]string, seen *map[string]bool) {
 	current := err
 	for i := 0; i < 2; i++ {
 		cause := errors.Unwrap(current)
-		if cause == nil || !isCarrier(cause) {
+		if cause == nil {
 			break
 		}
-		carrierClassifications := extractCarrierClassifications(cause)
-		addPureSentinels(carrierClassifications, sentinels, seen)
+		classifications, ok := errx.CarrierClassifications(cause)
+		if !ok {
+			break
+		}
+		addPureSentinels(classifications, sentinels, seen)
 		current = cause
 	}
 }
 
 // addSelfAsPureSentinel checks if the error itself is a pure sentinel and adds it.
-func addSelfAsPureSentinel(err error, sentinels *[]string, seen map[string]bool) {
+func addSelfAsPureSentinel(err error, sentinels *[]string, seen *map[string]bool) {
 	cls, ok := err.(errx.Classified)
 	if !ok || !cls.IsClassified() {
 		return
@@ -363,57 +394,10 @@ func addSelfAsPureSentinel(err error, sentinels *[]string, seen map[string]bool)
 		return
 	}
 	text := err.Error()
-	if !seen[text] {
-		*sentinels = append(*sentinels, text)
-		seen[text] = true
+	if rememberSentinel(text, seen) {
+		return
 	}
-}
-
-// extractCarrierClassifications uses reflection to extract classifications from a carrier.
-func extractCarrierClassifications(err error) []errx.Classified {
-	if err == nil {
-		return nil
-	}
-
-	v := reflect.ValueOf(err)
-	if v.Kind() == reflect.Pointer {
-		v = v.Elem()
-	}
-
-	if v.Kind() != reflect.Struct {
-		return nil
-	}
-
-	// Check if this is a carrier by looking for "classifications" field
-	clsField := v.FieldByName("classifications")
-	if !clsField.IsValid() {
-		return nil
-	}
-
-	// Extract classifications slice using unsafe to bypass export restrictions
-	var result []errx.Classified
-	for i := 0; i < clsField.Len(); i++ {
-		itemVal := clsField.Index(i)
-		// Use unsafe to get interface value from unexported field
-		if itemVal.CanAddr() {
-			// UnsafePointer() returns the pointer VALUE stored in the reflect.Value.
-			// Since itemVal is a value (not a pointer), we must take its address first.
-			ptr := itemVal.Addr().UnsafePointer()
-			item := *(*errx.Classified)(ptr)
-			result = append(result, item)
-		} else {
-			// If can't addr, create a new addressable value
-			newVal := reflect.New(itemVal.Type()).Elem()
-			newVal.Set(itemVal)
-			if newVal.CanAddr() {
-				ptr := newVal.Addr().UnsafePointer()
-				item := *(*errx.Classified)(ptr)
-				result = append(result, item)
-			}
-		}
-	}
-
-	return result
+	*sentinels = append(*sentinels, text)
 }
 
 // isErrxError checks if an error is an errx error (implements Classified).
@@ -423,22 +407,4 @@ func isErrxError(err error) bool {
 	}
 	_, ok := err.(errx.Classified)
 	return ok
-}
-
-// isCarrier checks if an error is a carrier type (has classifications field).
-func isCarrier(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	v := reflect.ValueOf(err)
-	if v.Kind() == reflect.Pointer {
-		v = v.Elem()
-	}
-
-	if v.Kind() != reflect.Struct {
-		return false
-	}
-
-	return v.FieldByName("classifications").IsValid()
 }

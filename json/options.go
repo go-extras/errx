@@ -7,12 +7,21 @@ type Option func(*config)
 // This prevents issues with deeply nested or potentially circular error chains.
 // The default is 32.
 //
-// When the depth limit is reached, the serialized error will have a message
-// of "(max depth reached)" and no further unwrapping will occur.
+// A non-positive value (zero or negative) disables the depth limit and allows
+// the serializer to traverse the chain to its end. This matches the convention
+// used by WithMaxStackFrames.
+//
+// When a positive depth limit is reached, the serialized error will have a
+// message of "(max depth reached)" and no further unwrapping will occur.
+// Circular references are still detected and reported as "(circular reference)"
+// regardless of the depth setting.
 //
 // Example:
 //
 //	jsonBytes, err := json.Marshal(err, json.WithMaxDepth(10))
+//
+//	// Disable the depth limit:
+//	jsonBytes, err := json.Marshal(err, json.WithMaxDepth(0))
 func WithMaxDepth(depth int) Option {
 	return func(c *config) {
 		c.maxDepth = depth
