@@ -444,7 +444,9 @@ func serializeStackTrace(err error, cfg *config, result *SerializedError) {
 		})
 	}
 
-	// If filtering removed every frame, drop the field entirely.
+	// If filtering removed every frame, drop the field entirely. omitempty
+	// already hides an empty slice from Marshal output, but resetting to nil
+	// also keeps direct ToSerializedError consumers from seeing a non-nil [].
 	if len(result.StackTrace) == 0 {
 		result.StackTrace = nil
 	}
