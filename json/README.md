@@ -58,6 +58,25 @@ Limit the number of stack frames included in the serialized output to reduce JSO
 jsonBytes, _ := errxjson.Marshal(err, errxjson.WithMaxStackFrames(10))
 ```
 
+### WithStackTraceTrimTop
+
+Drop the top `n` frames — the innermost frames, closest to where the trace was captured — to strip framework/runtime noise that sits above the meaningful application frames.
+
+```go
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithStackTraceTrimTop(2))
+```
+
+### WithStackFrameFilter
+
+Keep only the frames for which the predicate returns `true`, dropping the rest. Useful for removing `runtime.`/`net/http.` frames from rendered traces. Trimming and filtering run before the `WithMaxStackFrames` cap, so the cap counts only the surviving frames.
+
+```go
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithStackFrameFilter(
+    func(f stacktrace.Frame) bool {
+        return !strings.HasPrefix(f.Function, "runtime.")
+    }))
+```
+
 ### WithIncludeStandardErrors
 
 Control whether standard (non-errx) errors in the error chain are included.

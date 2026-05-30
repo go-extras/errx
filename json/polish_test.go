@@ -295,3 +295,179 @@ func TestWithMaxMessageBytes_UTF8Safe(t *testing.T) {
 		}
 	}
 }
+
+// The trim* helpers build a deterministic, deeply-nested stack with uniquely
+// named frames (innermost first: trimChainC, trimChainB, trimChainA, then the
+// test function and runtime). //go:noinline keeps each frame distinct so the
+// trim/filter tests below can reason about frame order precisely.
+//
+//go:noinline
+func trimChainC() error { return stacktrace.Wrap("op", errors.New("base")) }
+
+//go:noinline
+func trimChainB() error { return trimChainC() }
+
+//go:noinline
+func trimChainA() error { return trimChainB() }
+
+// unmarshalFrames marshals err with opts and decodes the resulting stack trace.
+func unmarshalFrames(t *testing.T, err error, opts ...errxjson.Option) ([]byte, errxjson.SerializedError) {
+	t.Helper()
+	data, mErr := errxjson.Marshal(err, opts...)
+	if mErr != nil {
+		t.Fatalf("Marshal error: %v", mErr)
+	}
+	var result errxjson.SerializedError
+	if uErr := json.Unmarshal(data, &result); uErr != nil {
+		t.Fatalf("Unmarshal error: %v", uErr)
+	}
+	return data, result
+}
+
+// TestWithStackTraceTrimTop drops the top (innermost) n frames.
+func TestWithStackTraceTrimTop(t *testing.T) {
+	testErr := trimChainA()
+	frames := stacktrace.Extract(testErr)
+	if len(frames) < 3 {
+		t.Fatalf("expected at least 3 frames, got %d", len(frames))
+	}
+
+	_, result := unmarshalFrames(t, testErr, errxjson.WithStackTraceTrimTop(2))
+
+	if got, want := len(result.StackTrace), len(frames)-2; got != want {
+		t.Fatalf("len(StackTrace) = %d, want %d", got, want)
+	}
+	// The first surviving frame is the original frames[2].
+	if result.StackTrace[0].Function != frames[2].Function || result.StackTrace[0].Line != frames[2].Line {
+		t.Errorf("first frame = %s:%d, want %s:%d",
+			result.StackTrace[0].Function, result.StackTrace[0].Line, frames[2].Function, frames[2].Line)
+	}
+	// The two trimmed functions must be gone.
+	for _, f := range result.StackTrace {
+		if f.Function == frames[0].Function || f.Function == frames[1].Function {
+			t.Errorf("frame %q survived trimming of the top 2 frames", f.Function)
+		}
+	}
+}
+
+// TestWithStackTraceTrimTop_ZeroOrNegativeIsNoOp confirms 0/negative keep all frames.
+func TestWithStackTraceTrimTop_ZeroOrNegativeIsNoOp(t *testing.T) {
+	testErr := trimChainA()
+
+	withDefault, mErr := errxjson.Marshal(testErr)
+	if mErr != nil {
+		t.Fatalf("Marshal default: %v", mErr)
+	}
+	for _, n := range []int{0, -5} {
+		withTrim, mErr := errxjson.Marshal(testErr, errxjson.WithStackTraceTrimTop(n))
+		if mErr != nil {
+			t.Fatalf("Marshal trim %d: %v", n, mErr)
+		}
+		if string(withDefault) != string(withTrim) {
+			t.Errorf("WithStackTraceTrimTop(%d) changed output:\n  default: %s\n  trim:    %s", n, withDefault, withTrim)
+		}
+	}
+}
+
+// TestWithStackTraceTrimTop_AllTrimmedOmitsField drops the field when n >= len.
+func TestWithStackTraceTrimTop_AllTrimmedOmitsField(t *testing.T) {
+	testErr := trimChainA()
+	frames := stacktrace.Extract(testErr)
+
+	for _, n := range []int{len(frames), len(frames) + 10} {
+		data, result := unmarshalFrames(t, testErr, errxjson.WithStackTraceTrimTop(n))
+		if len(result.StackTrace) != 0 {
+			t.Errorf("n=%d: expected empty stack trace, got %d frames", n, len(result.StackTrace))
+		}
+		if strings.Contains(string(data), "stack_trace") {
+			t.Errorf("n=%d: expected stack_trace field to be omitted, got: %s", n, data)
+		}
+	}
+}
+
+// TestWithStackFrameFilter_DropsRejected removes frames the predicate rejects.
+func TestWithStackFrameFilter_DropsRejected(t *testing.T) {
+	testErr := trimChainA()
+	frames := stacktrace.Extract(testErr)
+
+	dropped := 0
+	for _, f := range frames {
+		if strings.Contains(f.Function, "trimChainB") {
+			dropped++
+		}
+	}
+	if dropped == 0 {
+		t.Fatal("expected at least one trimChainB frame to drop")
+	}
+
+	keep := func(f stacktrace.Frame) bool { return !strings.Contains(f.Function, "trimChainB") }
+	_, result := unmarshalFrames(t, testErr, errxjson.WithStackFrameFilter(keep))
+
+	if got, want := len(result.StackTrace), len(frames)-dropped; got != want {
+		t.Fatalf("len(StackTrace) = %d, want %d", got, want)
+	}
+	var sawA, sawC bool
+	for _, f := range result.StackTrace {
+		if strings.Contains(f.Function, "trimChainB") {
+			t.Errorf("filtered frame %q survived", f.Function)
+		}
+		sawA = sawA || strings.Contains(f.Function, "trimChainA")
+		sawC = sawC || strings.Contains(f.Function, "trimChainC")
+	}
+	if !sawA || !sawC {
+		t.Errorf("expected sibling frames to remain (trimChainA=%v, trimChainC=%v)", sawA, sawC)
+	}
+}
+
+// TestWithStackFrameFilter_NilIsNoOp confirms a nil filter keeps all frames.
+func TestWithStackFrameFilter_NilIsNoOp(t *testing.T) {
+	testErr := trimChainA()
+
+	withDefault, mErr := errxjson.Marshal(testErr)
+	if mErr != nil {
+		t.Fatalf("Marshal default: %v", mErr)
+	}
+	withNil, mErr := errxjson.Marshal(testErr, errxjson.WithStackFrameFilter(nil))
+	if mErr != nil {
+		t.Fatalf("Marshal nil filter: %v", mErr)
+	}
+	if string(withDefault) != string(withNil) {
+		t.Errorf("nil filter changed output:\n  default: %s\n  nil:     %s", withDefault, withNil)
+	}
+}
+
+// TestStackFrameTrim_Ordering verifies the apply order: trim top, then filter,
+// then cap — so the cap counts only post-filter survivors. With TrimTop(1)
+// removing trimChainC and the filter removing trimChainB, a cap of 2 yields
+// trimChainA followed by the test function.
+func TestStackFrameTrim_Ordering(t *testing.T) {
+	testErr := trimChainA()
+	frames := stacktrace.Extract(testErr)
+	if len(frames) < 4 {
+		t.Fatalf("expected at least 4 frames, got %d", len(frames))
+	}
+
+	keep := func(f stacktrace.Frame) bool { return !strings.Contains(f.Function, "trimChainB") }
+	_, result := unmarshalFrames(t, testErr,
+		errxjson.WithStackTraceTrimTop(1),
+		errxjson.WithStackFrameFilter(keep),
+		errxjson.WithMaxStackFrames(2),
+	)
+
+	if len(result.StackTrace) != 2 {
+		t.Fatalf("len(StackTrace) = %d, want 2 (cap counts post-filter survivors)", len(result.StackTrace))
+	}
+	// frames[0]=trimChainC trimmed, frames[1]=trimChainB filtered → survivors
+	// start at frames[2] (trimChainA), then frames[3] (the test function).
+	if result.StackTrace[0].Function != frames[2].Function {
+		t.Errorf("first survivor = %q, want %q", result.StackTrace[0].Function, frames[2].Function)
+	}
+	if result.StackTrace[1].Function != frames[3].Function {
+		t.Errorf("second survivor = %q, want %q", result.StackTrace[1].Function, frames[3].Function)
+	}
+	for _, f := range result.StackTrace {
+		if strings.Contains(f.Function, "trimChainC") || strings.Contains(f.Function, "trimChainB") {
+			t.Errorf("frame %q should have been removed", f.Function)
+		}
+	}
+}

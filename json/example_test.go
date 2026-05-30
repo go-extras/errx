@@ -3,6 +3,7 @@ package json_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-extras/errx"
 	errxjson "github.com/go-extras/errx/json"
@@ -90,6 +91,43 @@ func ExampleWithMaxStackFrames() {
 	// Output:
 	// Stack frames: 3
 	// Has stack trace: true
+}
+
+// ExampleWithStackTraceTrimTop demonstrates dropping the innermost frames.
+func ExampleWithStackTraceTrimTop() {
+	err := stacktrace.Wrap("operation failed", errors.New("base error"))
+
+	full := errxjson.ToSerializedError(err)
+	// Drop the top 2 (innermost) frames.
+	trimmed := errxjson.ToSerializedError(err, errxjson.WithStackTraceTrimTop(2))
+
+	fmt.Println(len(trimmed.StackTrace) == len(full.StackTrace)-2)
+
+	// Output:
+	// true
+}
+
+// ExampleWithStackFrameFilter demonstrates dropping runtime/framework frames.
+func ExampleWithStackFrameFilter() {
+	err := stacktrace.Wrap("operation failed", errors.New("base error"))
+
+	// Keep only application frames; drop testing/runtime noise.
+	serialized := errxjson.ToSerializedError(err, errxjson.WithStackFrameFilter(
+		func(f stacktrace.Frame) bool {
+			return !strings.HasPrefix(f.Function, "testing.") &&
+				!strings.HasPrefix(f.Function, "runtime.")
+		}))
+
+	noise := false
+	for _, fr := range serialized.StackTrace {
+		if strings.HasPrefix(fr.Function, "testing.") || strings.HasPrefix(fr.Function, "runtime.") {
+			noise = true
+		}
+	}
+	fmt.Println(noise)
+
+	// Output:
+	// false
 }
 
 // ExampleWithIncludeStandardErrors demonstrates filtering error types

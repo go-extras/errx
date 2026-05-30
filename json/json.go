@@ -91,6 +91,14 @@ type config struct {
 	// stack frame's File field.
 	stackTraceTrimPath string
 
+	// stackTraceTrimTop, when > 0, drops that many leading (innermost) frames
+	// from each serialized stack trace before filtering and capping.
+	stackTraceTrimTop int
+
+	// stackFrameFilter, when non-nil, is consulted per frame; frames for which
+	// it returns false are dropped from the serialized output.
+	stackFrameFilter StackFrameFilter
+
 	// maxMessageBytes, when > 0, truncates each serialized error's Message to
 	// at most that many bytes (with a "...(truncated)" suffix).
 	maxMessageBytes int
@@ -393,22 +401,52 @@ func isJSONSerializable(v any) bool {
 }
 
 // serializeStackTrace extracts and serializes stack frames from an error.
+//
+// Frames are processed in a fixed order so presentation options compose
+// predictably: trim the top (innermost) frames, then drop frames rejected by
+// the filter, then cap the survivors at maxStackFrames, then trim File paths.
+// Capping last means the cap counts only the frames the caller intends to
+// render.
 func serializeStackTrace(err error, cfg *config, result *SerializedError) {
 	frames := stacktrace.Extract(err)
 	if len(frames) == 0 {
 		return
 	}
-	limit := len(frames)
-	if cfg.maxStackFrames > 0 && limit > cfg.maxStackFrames {
-		limit = cfg.maxStackFrames
+
+	// Drop the top (innermost) frames first. If the trim consumes the whole
+	// trace, leave StackTrace nil so the omitempty field is dropped.
+	if cfg.stackTraceTrimTop > 0 {
+		if cfg.stackTraceTrimTop >= len(frames) {
+			return
+		}
+		frames = frames[cfg.stackTraceTrimTop:]
 	}
-	result.StackTrace = make([]SerializedFrame, limit)
-	for i := 0; i < limit; i++ {
-		result.StackTrace[i] = SerializedFrame{
+
+	// capHint is an exact upper bound on the output length: the filter only
+	// removes frames and the loop breaks at maxStackFrames, so append never
+	// grows the slice — the no-filter hot path allocates exactly as before.
+	capHint := len(frames)
+	if cfg.maxStackFrames > 0 && capHint > cfg.maxStackFrames {
+		capHint = cfg.maxStackFrames
+	}
+	result.StackTrace = make([]SerializedFrame, 0, capHint)
+	for i := range frames {
+		if cfg.stackFrameFilter != nil && !cfg.stackFrameFilter(frames[i]) {
+			continue
+		}
+		if cfg.maxStackFrames > 0 && len(result.StackTrace) >= cfg.maxStackFrames {
+			break
+		}
+		result.StackTrace = append(result.StackTrace, SerializedFrame{
 			File:     trimStackPath(frames[i].File, cfg.stackTraceTrimPath),
 			Line:     frames[i].Line,
 			Function: frames[i].Function,
-		}
+		})
+	}
+
+	// If filtering removed every frame, drop the field entirely.
+	if len(result.StackTrace) == 0 {
+		result.StackTrace = nil
 	}
 }
 

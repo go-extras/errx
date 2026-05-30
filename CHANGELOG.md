@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`errx.Join(errs ...error) error`** — aggregate multiple errors into a single value, mirroring the standard library's `errors.Join` (drops nil entries; returns `nil` when every entry is nil) but in the errx namespace so the aggregate composes with `Classify`/`Wrap`. The result implements `Unwrap() []error`, so `errors.Is`/`errors.As` and errx's `ExtractAttrs`/`HasAttrs`/`DisplayText` traverse every branch, and the `json` subpackage serializes members into `causes`.
 
+- **Render-time stack-frame trimming in the `json` subpackage** ([#43]) — two new `json.Option`s complete the serialize-time stack-trace controls (alongside the existing `WithMaxStackFrames` and `WithStackTraceTrimPaths`), so capture stays cheap and presentation policy lives at the serialize layer (the motivation behind [pkg/errors#129](https://github.com/pkg/errors/issues/129) and [pkg/errors#111](https://github.com/pkg/errors/issues/111)):
+  - `WithStackTraceTrimTop(n int)` — drop the top `n` (innermost) frames, removing framework/runtime noise that sits above the meaningful application frames. `n >= len(frames)` omits the trace entirely; `n <= 0` (the default) keeps all frames.
+  - `WithStackFrameFilter(func(stacktrace.Frame) bool)` — a keep-predicate: frames for which it returns `true` are retained, the rest dropped (e.g. strip `runtime.`/`net/http.` frames). A nil filter (the default) keeps all frames.
+  - Frames are processed in a fixed order — trim top, then filter, then the `WithMaxStackFrames` cap, then `WithStackTraceTrimPaths` — so the cap counts only the frames that survive trimming. If trimming/filtering removes every frame, the `stack_trace` field is omitted. No existing option's behavior changes.
+
 ### Changed
 
 - **`stacktrace` subpackage no longer uses `reflect` or `unsafe`** ([#29], [#35]) — `extractCarrierClassifications` now goes through the public `errx.CarrierClassifications` accessor instead of reflecting into the unexported `carrier.classifications` field, mirroring the migration already done in the `json` subpackage ([#17]). A future rename of the unexported `carrier` type can no longer silently drop classification extraction during stack-trace traversal. No exported APIs or behavior change.
@@ -128,6 +133,7 @@ This release lands a large set of improvements across the core package and every
 [#25]: https://github.com/go-extras/errx/pull/25
 [#29]: https://github.com/go-extras/errx/issues/29
 [#35]: https://github.com/go-extras/errx/pull/35
+[#43]: https://github.com/go-extras/errx/issues/43
 [#45]: https://github.com/go-extras/errx/issues/45
 
 ## [1.2.1] - 2026-01-31
