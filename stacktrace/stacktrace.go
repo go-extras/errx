@@ -31,7 +31,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
 	"runtime"
 	"sync"
 
@@ -349,50 +348,14 @@ func (w *traceWalker) walkMultiError(err error) bool {
 	return true
 }
 
-// extractCarrierClassifications uses reflection to surface the classifications
-// of an errx carrier (or any struct with a "classifications" field of type
-// []errx.Classified). It mirrors the technique used by the json subpackage so
-// that ExtractAll can reach traced entries attached as classifications.
+// extractCarrierClassifications surfaces the classifications attached to an errx
+// carrier via the public errx.CarrierClassifications accessor. It mirrors the
+// technique used by the json subpackage so that ExtractAll can reach traced
+// entries attached as classifications, without reflection or unsafe-pointer
+// access to errx internals.
 func extractCarrierClassifications(err error) []errx.Classified {
-	if err == nil {
-		return nil
-	}
-
-	v := reflect.ValueOf(err)
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return nil
-		}
-		v = v.Elem()
-	}
-	if v.Kind() != reflect.Struct {
-		return nil
-	}
-
-	field := v.FieldByName("classifications")
-	if !field.IsValid() || field.Kind() != reflect.Slice {
-		return nil
-	}
-
-	result := make([]errx.Classified, 0, field.Len())
-	for i := 0; i < field.Len(); i++ {
-		itemVal := field.Index(i)
-		if itemVal.CanAddr() {
-			// UnsafePointer() returns the pointer value stored in the reflect.Value.
-			ptr := itemVal.Addr().UnsafePointer()
-			item := *(*errx.Classified)(ptr)
-			result = append(result, item)
-			continue
-		}
-		newVal := reflect.New(itemVal.Type()).Elem()
-		newVal.Set(itemVal)
-		if newVal.CanAddr() {
-			ptr := newVal.Addr().UnsafePointer()
-			item := *(*errx.Classified)(ptr)
-			result = append(result, item)
-		}
-	}
-	return result
+	cls, _ := errx.CarrierClassifications(err)
+	return cls
 }
 
 // Wrap wraps an error with additional context text and optional classifications,

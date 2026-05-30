@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`stacktrace` subpackage no longer uses `reflect` or `unsafe`** ([#29], [#35]) — `extractCarrierClassifications` now goes through the public `errx.CarrierClassifications` accessor instead of reflecting into the unexported `carrier.classifications` field, mirroring the migration already done in the `json` subpackage ([#17]). A future rename of the unexported `carrier` type can no longer silently drop classification extraction during stack-trace traversal. No exported APIs or behavior change.
+
 ## [1.3.0] - 2026-05-17
 
 This release lands a large set of improvements across the core package and every subpackage: four JSON Marshal output bugs are fixed, the `stacktrace` and `json` subpackages get new APIs and perf polish, typed-nil handling is hardened, internal `reflect`/`unsafe` usage in the `json` subpackage is removed, and a batch of small additions makes errx easier to integrate with non-slog loggers and PII-sensitive log pipelines. No existing public signature or JSON output schema changes; previously-buggy JSON output for certain inputs now produces the correct result.
@@ -112,6 +118,8 @@ This release lands a large set of improvements across the core package and every
 [#23]: https://github.com/go-extras/errx/pull/23
 [#24]: https://github.com/go-extras/errx/pull/24
 [#25]: https://github.com/go-extras/errx/pull/25
+[#29]: https://github.com/go-extras/errx/issues/29
+[#35]: https://github.com/go-extras/errx/pull/35
 
 ## [1.2.1] - 2026-01-31
 
