@@ -506,6 +506,28 @@ func ExampleAttrList_ToSlogArgs() {
 	// ERROR operation failed user_id=123 action=delete resource=account
 }
 
+// ExampleJoin demonstrates aggregating multiple errors into one and classifying
+// the aggregate via the existing API. Attributes from every joined branch, plus
+// the group-level classification, all remain inspectable.
+func ExampleJoin() {
+	ErrBatch := errx.NewSentinel("batch failed")
+
+	// Two independent failures, each carrying its own attribute.
+	item1 := errx.Classify(errors.New("item 1 failed"), errx.Attrs("index", 0))
+	item2 := errx.Classify(errors.New("item 2 failed"), errx.Attrs("index", 1))
+
+	// Join them, then classify the aggregate as a batch failure.
+	err := errx.Classify(errx.Join(item1, item2), ErrBatch)
+
+	fmt.Println(errors.Is(err, ErrBatch))
+	fmt.Println(err.Error())
+
+	// Output:
+	// true
+	// item 1 failed
+	// item 2 failed
+}
+
 // exampleHandler is a minimal slog.Handler used by the slog examples to keep
 // their // Output: assertions stable across Go versions. It prints records as
 // "<LEVEL> <message> [k=v...]" without timestamps.
