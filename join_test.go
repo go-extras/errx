@@ -38,6 +38,47 @@ func TestJoinErrorFormat(t *testing.T) {
 	}
 }
 
+// TestJoinSingleElement pins the single-member contract: Error() has no trailing
+// newline and the member's identity is preserved.
+func TestJoinSingleElement(t *testing.T) {
+	solo := errors.New("solo")
+	err := errx.Join(solo)
+	if got, want := err.Error(), "solo"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	if !errors.Is(err, solo) {
+		t.Error("expected single-element join to match its member")
+	}
+}
+
+// TestJoinOfJoin verifies nested joins traverse for errors.Is and render flat.
+func TestJoinOfJoin(t *testing.T) {
+	ErrA := errx.NewSentinel("a")
+	inner := errx.Join(errx.ClassifyNew("x", ErrA), errors.New("y"))
+	err := errx.Join(inner, errors.New("z"))
+
+	if !errors.Is(err, ErrA) {
+		t.Error("expected nested join to match inner sentinel ErrA")
+	}
+	if got, want := err.Error(), "x\ny\nz"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+// TestJoinDoesNotAliasCallerSlice verifies the constructor copies its input, so
+// mutating the caller's slice afterward does not change the aggregate.
+func TestJoinDoesNotAliasCallerSlice(t *testing.T) {
+	e1 := errors.New("one")
+	e2 := errors.New("two")
+	src := []error{e1, e2}
+	err := errx.Join(src...)
+
+	src[0] = errors.New("mutated")
+	if !errors.Is(err, e1) {
+		t.Error("join must not alias the caller's slice")
+	}
+}
+
 // TestJoinIsTraversal verifies errors.Is descends into every joined branch.
 func TestJoinIsTraversal(t *testing.T) {
 	ErrA := errx.NewSentinel("a")

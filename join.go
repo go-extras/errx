@@ -10,18 +10,15 @@ type joinError struct {
 }
 
 // Error renders each joined error on its own line, matching the format used by
-// the standard library's errors.Join.
+// the standard library's errors.Join. Each member's Error() is called exactly
+// once (single pass), mirroring the stdlib implementation.
 func (e *joinError) Error() string {
-	// Pre-size the buffer: one byte per separating newline plus each message.
-	n := len(e.errs) - 1
-	for _, err := range e.errs {
-		n += len(err.Error())
+	if len(e.errs) == 1 {
+		return e.errs[0].Error()
 	}
-	b := make([]byte, 0, n)
-	for i, err := range e.errs {
-		if i > 0 {
-			b = append(b, '\n')
-		}
+	b := []byte(e.errs[0].Error())
+	for _, err := range e.errs[1:] {
+		b = append(b, '\n')
 		b = append(b, err.Error()...)
 	}
 	return string(b)
@@ -40,7 +37,7 @@ func (e *joinError) Unwrap() []error {
 // The result implements Unwrap() []error, so it works transparently with
 // errors.Is and errors.As, and errx helpers such as ExtractAttrs, HasAttrs, and
 // DisplayText traverse every joined branch. The json subpackage serializes the
-// members into the Causes field.
+// members into the causes array (by default).
 //
 // Join is intentionally orthogonal to classification: to classify an aggregate,
 // compose it with the existing API rather than threading classifications through
