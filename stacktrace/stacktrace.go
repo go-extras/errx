@@ -22,9 +22,13 @@
 //	    // outermost trace first
 //	}
 //
-// Traced errors implement fmt.Formatter so that fmt.Sprintf("%+v", err) renders
-// the captured stack frames in the de-facto pkg/errors style. The plain "%v" and
-// "%s" verbs still produce the underlying error message.
+// Errors produced by Wrap, Classify, and ClassifyNew (and by errx.Wrap/Classify
+// when a trace from Here is attached) implement fmt.Formatter, so
+// fmt.Sprintf("%+v", err) renders the error message followed by the captured
+// stack frames in the de-facto pkg/errors style. The plain "%v" and "%s" verbs
+// still produce the underlying error message only. This makes errx a drop-in
+// target for codebases migrating off github.com/pkg/errors, where logging errors
+// with "%+v" is the standard idiom for surfacing stack traces.
 package stacktrace
 
 import (

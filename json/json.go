@@ -295,8 +295,8 @@ func toSerializedError(err error, cfg *config, visited *visitedSet, depth int) *
 //     classifications.
 //
 //   - When err is not a carrier, the node is err itself and exactly one
-//     immediately-following carrier is absorbed (this is the carrier inserted
-//     by the same errx.Wrap call as the fmt-wrap). Subsequent carriers
+//     immediately-following carrier is absorbed (this is the carrier paired with
+//     the wrap-context layer by the same errx.Wrap call). Subsequent carriers
 //     belong to a deeper level and are passed through as nextCause.
 //
 // Carrier detection uses the public errx.CarrierClassifications helper to

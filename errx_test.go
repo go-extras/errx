@@ -748,16 +748,16 @@ func TestCarrierClassifications_ClassifyNew(t *testing.T) {
 }
 
 // TestCarrierClassifications_WrappedCarrier confirms that the helper returns
-// (nil, false) when the carrier sits beneath an fmt.Errorf wrapper. Callers
+// (nil, false) when the carrier sits beneath the wrap-context layer. Callers
 // must unwrap themselves before inspecting.
 func TestCarrierClassifications_WrappedCarrier(t *testing.T) {
 	tag := errx.NewSentinel("tag")
 	baseErr := errors.New("base error")
 	wrapped := errx.Wrap("context", baseErr, tag)
 
-	// Wrap returns an fmt.Errorf-style wrapper around the carrier.
+	// Wrap returns a context wrapper around the carrier, not the carrier itself.
 	if _, ok := errx.CarrierClassifications(wrapped); ok {
-		t.Error("expected ok=false for fmt.Errorf wrapper around carrier")
+		t.Error("expected ok=false for the wrap-context layer around the carrier")
 	}
 
 	// Unwrapping once should expose the carrier.
