@@ -1,6 +1,10 @@
 package json
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/go-extras/errx/stacktrace"
+)
 
 // Option is a function that configures the JSON serialization behavior.
 type Option func(*config)
@@ -12,6 +16,11 @@ type Option func(*config)
 // Returning the original value unchanged is a no-op. Returning nil is supported
 // and produces a JSON null for that attribute's value.
 type AttributeValueTransformer func(key string, v any) any
+
+// StackFrameFilter reports whether a stack frame should be kept in the
+// serialized output. It receives each frame and returns true to retain it,
+// false to drop it. Used with [WithStackFrameFilter].
+type StackFrameFilter func(stacktrace.Frame) bool
 
 // WithMaxDepth sets the maximum depth for traversing error chains.
 // This prevents issues with deeply nested or potentially circular error chains.
@@ -155,6 +164,49 @@ func WithAttributeValueTransformer(fn AttributeValueTransformer) Option {
 func WithStackTraceTrimPaths(prefix string) Option {
 	return func(c *config) {
 		c.stackTraceTrimPath = prefix
+	}
+}
+
+// WithStackTraceTrimTop drops the top n frames — the innermost frames, closest
+// to where the trace was captured — from each serialized stack trace. This
+// removes framework/runtime noise that sits above the meaningful application
+// frames (the motivation behind pkg/errors#111 and pkg/errors#129).
+//
+// Trimming happens before [WithStackFrameFilter] and before the
+// [WithMaxStackFrames] cap, so the cap counts only the frames that survive
+// trimming. If n is greater than or equal to the number of frames, the stack
+// trace is omitted entirely. A value of 0 or negative (the default) keeps all
+// frames.
+//
+// Example:
+//
+//	jsonBytes, err := json.Marshal(err, json.WithStackTraceTrimTop(2))
+func WithStackTraceTrimTop(n int) Option {
+	return func(c *config) {
+		c.stackTraceTrimTop = n
+	}
+}
+
+// WithStackFrameFilter installs a predicate that decides, per frame, whether a
+// stack frame is kept in the serialized output. The predicate returns true to
+// keep the frame and false to drop it. This is useful for stripping
+// framework/runtime frames (for example those in "runtime." or "net/http.")
+// from rendered traces.
+//
+// The filter runs after [WithStackTraceTrimTop] and before the
+// [WithMaxStackFrames] cap, so the cap counts only frames that pass the filter.
+// If filtering removes every frame, the stack trace is omitted entirely.
+// Passing a nil filter (the default) keeps all frames.
+//
+// Example:
+//
+//	jsonBytes, err := json.Marshal(err, json.WithStackFrameFilter(
+//	    func(f stacktrace.Frame) bool {
+//	        return !strings.HasPrefix(f.Function, "runtime.")
+//	    }))
+func WithStackFrameFilter(keep StackFrameFilter) Option {
+	return func(c *config) {
+		c.stackFrameFilter = keep
 	}
 }
 

@@ -422,6 +422,9 @@ jsonBytes, _ := errxjson.Marshal(err,
     errxjson.WithAttributeValueTransformer(redact),
     errxjson.WithMaxDepth(16),            // bound chain depth
     errxjson.WithMaxStackFrames(10),      // bound stack frames
+    errxjson.WithStackTraceTrimTop(2),    // drop innermost (top) frames
+    errxjson.WithStackFrameFilter(        // keep only frames you care about
+        func(f stacktrace.Frame) bool { return !strings.HasPrefix(f.Function, "runtime.") }),
     errxjson.WithStackTrace(false),       // drop stack traces entirely
     errxjson.WithAttributes(false),       // drop attributes entirely
     errxjson.WithSentinels(false),        // drop sentinel text
