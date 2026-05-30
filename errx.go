@@ -106,24 +106,19 @@ package errx
 import (
 	"errors"
 	"fmt"
-	"unsafe"
+
+	"github.com/go-extras/errx/internal/errptr"
 )
 
 // isNilClassified reports whether the given Classified is nil in any form:
 // either an untyped-nil interface, or a typed-nil interface (e.g. a
 // `(*sentinel)(nil)` stored in a Classified). The latter case slips past a
 // plain `c != nil` check because the interface still has a non-nil type
-// pointer. Detecting it without reflection avoids the runtime cost of
-// reflect.ValueOf while remaining safe: we only inspect the interface header.
+// pointer. We delegate to errptr.Get, which returns 0 for both forms by
+// inspecting the interface header — keeping all unsafe-pointer code in the
+// single internal/errptr package rather than duplicating it here.
 func isNilClassified(c Classified) bool {
-	if c == nil {
-		return true
-	}
-	type iface struct {
-		typ  unsafe.Pointer
-		data unsafe.Pointer
-	}
-	return (*iface)(unsafe.Pointer(&c)).data == nil
+	return errptr.Get(c) == 0
 }
 
 // nonNilClassifications returns a slice containing only the non-nil entries
