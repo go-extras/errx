@@ -38,7 +38,7 @@ traces and JSON as opt-in subpackages you only pay for when you import them.
 | JSON serialization | ✅ | ❌ | ⚠️ protobuf | ❌ | ❌ | ✅ |
 | Multi-error root (`errors.Join`-style) | ✅ `Join`<sup>2</sup> | ❌ | ✅ `Join` | ❌ | ❌ | ❌ |
 | Cross-service round-trip (decode) | ⚠️ serialize-only<sup>1</sup> | ❌ | ✅ wire codec | ❌ | ❌ | ⚠️ one-way |
-| Maintenance status | ✅ active | ⚠️ archived | ✅ active | ✅ active | ⚠️ since 2022 | ⚠️ pre-1.0<sup>3</sup> |
+| Maintenance status | ✅ active | ⚠️ [unmaintained](#migrating-from-pkgerrors) | ✅ active | ✅ active | ⚠️ since 2022 | ⚠️ pre-1.0<sup>3</sup> |
 
 <sup>1</sup> errx serializes errors to JSON (including multi-error branches) but does not
 yet decode them back into an error value on a receiving service. If wire-portable errors
@@ -451,6 +451,57 @@ non-classification error by accident) and slightly heavier. Use `compat` when mi
 integrating; use the core package for new, type-safe code. See the
 [compat docs](https://pkg.go.dev/github.com/go-extras/errx/compat).
 
+## Migrating from `pkg/errors`
+
+[`pkg/errors`][pkgerrors] is **unmaintained** — and not even formally archived, which is
+arguably worse: the repo still accepts issues and pull requests, but the last release was
+v0.9.1 in January 2020, dozens of issues and PRs sit unanswered, its own maintainer has
+publicly asked for someone else to take it over (explaining it had gone years without upkeep
+and that he no longer uses it, [pkg/errors#245][pkgerrors-245]), and its test suite no longer
+passes cleanly on current Go toolchains ([pkg/errors#249][pkgerrors-249]). The
+wrap-plus-stack-trace niche it filled is exactly what errx covers, so moving off it is
+low-risk — and there's a tool that does the rewrite for you.
+
+**[errx-migrate][errx-migrate]** is a type-aware AST rewriter that converts a
+`pkg/errors`-based codebase to errx **safely and idempotently**. It uses full type
+information to resolve which `errors` identifier actually refers to `pkg/errors` (handling
+aliases, dot-imports, and shadowing), so it never rewrites stdlib `errors` calls by mistake,
+and it leaves `gofmt`-clean output with explicit `// TODO(errx-migrate)` markers wherever a
+rewrite can't be proven safe.
+
+```bash
+go install github.com/go-extras/errx-migrate/cmd/errx-migrate@latest
+
+errx-migrate -diff ./...          # preview the migration as a unified diff (no writes)
+errx-migrate -w ./...             # apply it in place (stack-preserving, the default)
+errx-migrate -w -no-stack ./...   # lean mode: zero-dependency core + stdlib errors/fmt
+```
+
+By default it runs in **stack-preserving** mode, mapping the stack-capturing calls onto the
+[`errx/stacktrace`](#stack-traces--stacktrace) subpackage so runtime behavior — including
+`%+v` stack rendering — is unchanged. Pass `-no-stack` for **lean** mode, which drops
+implicit stack capture and targets the zero-dependency errx core plus stdlib `errors`/`fmt`
+(an explicit `errors.WithStack` is still honored with a real stack).
+
+| `pkg/errors` | stack-preserving (default) | lean (`-no-stack`) |
+|---|---|---|
+| `errors.New` / `errors.Errorf` | `stacktrace.ClassifyNew(…)` | stdlib `errors.New` / `fmt.Errorf` |
+| `errors.Wrap(err, msg)` | `stacktrace.Wrap(msg, err)` | `errx.Wrap(msg, err)` |
+| `errors.Wrapf(err, f, …)` | `stacktrace.Wrap(fmt.Sprintf(f, …), err)` | `errx.Wrap(fmt.Sprintf(f, …), err)` |
+| `errors.WithMessage(err, msg)` | `errx.Wrap(msg, err)` | `errx.Wrap(msg, err)` |
+| `errors.WithStack(err)` | `stacktrace.Classify(err)` | `stacktrace.Classify(err)` |
+| `errors.Is` / `As` / `Unwrap` | stdlib `errors.*` | stdlib `errors.*` |
+
+Note the **argument-order swap** — `pkg/errors.Wrap(err, msg)` becomes `errx.Wrap(msg, err)`
+— which the rewriter handles for you; nil semantics match (`Wrap(nil, …)` ⇒ `nil` on both
+sides). The full mapping, the conservative fallbacks, and an analyzer mode that runs under
+`go vet` / `gopls` / golangci-lint are documented in the
+[errx-migrate README][errx-migrate].
+
+Prefer to migrate by hand, incrementally? Start with the
+[`compat`](#standard-error-compatibility--compat) subpackage so you can pass the plain
+sentinel `error` values you already have, then adopt the type-safe core where it helps.
+
 ## Complete example: an HTTP handler
 
 ```go
@@ -590,9 +641,10 @@ err := errx.Wrap("failed to get user", cause,
 // errx.ExtractAttrs(err) • err.Error() still has full internal context
 ```
 
-Migrating from stdlib or `pkg/errors`? Start with the [`compat`](#standard-error-compatibility--compat)
-subpackage so you can pass the plain sentinel `error` values you already have, then adopt
-the type-safe core where it helps.
+Migrating from `pkg/errors`? [errx-migrate](#migrating-from-pkgerrors) automates the whole
+rewrite. Coming from stdlib — or migrating by hand — start with the
+[`compat`](#standard-error-compatibility--compat) subpackage so you can pass the plain
+sentinel `error` values you already have, then adopt the type-safe core where it helps.
 
 ## Use cases
 
@@ -626,6 +678,9 @@ best practices.
 
 <!-- alternative libraries -->
 [pkgerrors]: https://github.com/pkg/errors
+[pkgerrors-245]: https://github.com/pkg/errors/issues/245
+[pkgerrors-249]: https://github.com/pkg/errors/issues/249
+[errx-migrate]: https://github.com/go-extras/errx-migrate
 [crdb]: https://github.com/cockroachdb/errors
 [errorx]: https://github.com/joomcode/errorx
 [failure]: https://github.com/morikuni/failure
