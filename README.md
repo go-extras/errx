@@ -1,6 +1,6 @@
 # errx
 
-Rich error handling with classification tags, displayable messages, and structured attributes for Go
+Rich, idiomatic error handling for Go — classification you can check with `errors.Is`, user-safe messages you can show, and structured attributes you can log, all in one composable call.
 
 [![CI](https://github.com/go-extras/errx/actions/workflows/go-test.yml/badge.svg)](https://github.com/go-extras/errx/actions/workflows/go-test.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-extras/errx.svg)](https://pkg.go.dev/github.com/go-extras/errx)
@@ -8,48 +8,82 @@ Rich error handling with classification tags, displayable messages, and structur
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.25-00ADD8?logo=go)](https://go.dev/dl/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Overview
+```go
+return errx.Wrap("authentication failed", cause,
+    errx.NewDisplayable("Invalid username or password"), // safe to show the user
+    errx.Attrs("username", username, "reason", "user_not_found"), // safe to log
+    ErrUnauthorized, // safe to branch on with errors.Is
+)
+```
 
-`errx` is a powerful error handling library for Go that extends the standard library's error handling with five key capabilities:
+One call attaches everything. The classification, the user-facing message, and the
+structured attributes all travel with the error and stay extractable anywhere up the
+stack — without ever leaking into `err.Error()`.
 
-- **Classification Tags**: Categorize errors for programmatic checking without cluttering error messages
-- **Displayable Errors**: Create user-safe messages that can be extracted from error chains
-- **Structured Attributes**: Attach key-value metadata for logging and debugging
-- **Stack Traces** (optional): Capture call stacks for debugging via the `stacktrace` subpackage
-- **JSON Serialization** (optional): Serialize errors to JSON for API responses and logging via the `json` subpackage
+## Why errx
 
-The library is designed for developers building production systems that need sophisticated error handling, clear separation between internal and user-facing errors, and rich contextual information for debugging.
+Most Go error libraries do one thing well: `pkg/errors` wraps, `eris` serializes,
+`errorx` classifies, the `multierr` family aggregates. errx is the only one that
+combines **hierarchical `errors.Is` classification**, **user-safe displayable
+messages**, and **structured attributes** in a **zero-dependency core** — with stack
+traces and JSON as opt-in subpackages you only pay for when you import them.
 
-**Flexibility:** The core package uses a type-safe `Classified` interface for maximum safety and clarity. For codebases that prefer working with standard Go `error` interface, the `compat` subpackage provides compatible functions that accept any error type.
+| Capability | **errx** | [pkg/errors][pkgerrors] | [cockroachdb/errors][crdb] | [joomcode/errorx][errorx] | [morikuni/failure][failure] | [rotisserie/eris][eris] |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| Hierarchical classification (`errors.Is`) | ✅ sentinels | ❌ | ❌ | ✅ traits | ⚠️ codes | ❌ |
+| User-safe display messages | ✅ | ❌ | ⚠️ hints | ❌ | ⚠️ | ❌ |
+| Structured attributes (key/value) | ✅ | ❌ | ⚠️ strings | ✅ props | ✅ context | ❌ |
+| Zero-dependency / pay-for-what-you-use core | ✅ | ✅ | ❌ heavy | ⚠️ traces in core | ✅ | ⚠️ traces forced |
+| `slog` integration | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| JSON serialization | ✅ | ❌ | ⚠️ protobuf | ❌ | ❌ | ✅ |
+| Multi-error root (`errors.Join`-style) | ✅ `Join`<sup>2</sup> | ❌ | ✅ `Join` | ❌ | ❌ | ❌ |
+| Cross-service round-trip (decode) | ⚠️ serialize-only<sup>1</sup> | ❌ | ✅ wire codec | ❌ | ❌ | ⚠️ one-way |
+| Maintenance status | ✅ active | ⚠️ archived | ✅ active | ✅ active | ⚠️ since 2022 | ⚠️ pre-1.0<sup>3</sup> |
 
-**Target audience:** Backend developers, API engineers, and application architects building robust systems with comprehensive error handling requirements.
+<sup>1</sup> errx serializes errors to JSON (including multi-error branches) but does not
+yet decode them back into an error value on a receiving service. If wire-portable errors
+across service boundaries are your primary need, [cockroachdb/errors][crdb] is
+purpose-built for that. (Tracked for analysis in [#37](https://github.com/go-extras/errx/issues/37).)
 
-## Features
+<sup>2</sup> The standard library's `errors.Join` (Go 1.20+) already provides an
+aggregation root for free; `errx.Join` adds the ability to *classify and annotate the
+group* (`errx.Classify(errx.Join(…), ErrBatch, errx.Attrs(…))`) — see
+[Aggregating errors](#aggregating-errors). For pure aggregation, reach for stdlib
+`errors.Join` or the [multierr][umultierr] family.
 
-- ✅ **Hierarchical error classification** with sentinel-based error checking
-- ✅ **User-safe displayable messages** separate from internal error details
-- ✅ **Structured attributes** for rich logging and debugging context
-- ✅ **Optional stack traces** via the `stacktrace` subpackage
-- ✅ **JSON serialization** via the `json` subpackage for API responses and logging
-- ✅ **Standard error compatibility** via the `compat` subpackage for flexible integration
-- ✅ **Zero dependencies** in core package (stacktrace and json use only Go stdlib)
-- ✅ **Well-tested** with comprehensive test coverage
-- ✅ **Simple API** designed for ease of use and composability
-- ✅ **Compatible** with standard `errors.Is()` and `errors.As()`
+<sup>3</sup> [eris][eris] is actively maintained (CI/dependabot run), but its last
+functional release is v0.5.4 (2022) and it remains pre-1.0.
+
+### When another library is the better fit
+
+We'd rather be honest than oversell — pick the right tool:
+
+- **[cockroachdb/errors][crdb]** when you need errors encoded/decoded across services
+  over the wire, with redaction designed for Sentry. It's heavier by design because that
+  problem is hard.
+- **[go.uber.org/multierr][umultierr] / [hashicorp/go-multierror][hmultierr]** when your
+  problem is *aggregating* many errors into one. That's an orthogonal niche — pair it
+  with errx, don't replace it (and see [`errx.Join`](#aggregating-errors) below if you
+  want aggregation that carries classifications).
+- **[joomcode/errorx][errorx]** — the closest library to errx — when you want stack
+  traces captured automatically in the core with no opt-in step. errx differs by keeping
+  traces opt-in, by offering a dedicated *user-safe message* channel errorx lacks, and by
+  leaning on stdlib `errors.Is` instead of a bespoke trait-matching API.
+- **stdlib `errors` + `fmt.Errorf("%w", …)`** when all you need is wrapping plus
+  `errors.Is`. errx stays fully compatible, so you can reach for it later without a
+  rewrite.
 
 ## Requirements
 
 - Go 1.25+ (tracks the two most recent stable Go releases per the Go team's support policy)
 
-### Version Compatibility
-
-`errx` follows the [Go team's release policy](https://go.dev/doc/devel/release) and officially supports the two most recent stable Go releases. CI verifies the library on both the current `stable` and `oldstable` toolchains; older versions may work but are not tested.
-
-The `go` directive in `go.mod` declares the minimum language version required to build the module (currently `1.25`). The supported range is bumped when a new Go release ships, dropping the oldest then-unsupported version.
+errx follows the [Go team's release policy](https://go.dev/doc/devel/release) and
+officially supports the two most recent stable Go releases. CI verifies the library on
+both the current `stable` and `oldstable` toolchains; older versions may work but are not
+tested. The `go` directive in `go.mod` declares the minimum language version required to
+build the module.
 
 ## Installation
-
-Add the library to your Go module:
 
 ```bash
 go get github.com/go-extras/errx@latest
@@ -63,168 +97,128 @@ package main
 import (
     "errors"
     "fmt"
+
     "github.com/go-extras/errx"
 )
 
-// Define classification sentinels
+// Define classification sentinels once, at package level.
 var (
     ErrNotFound = errx.NewSentinel("resource not found")
     ErrInvalid  = errx.NewSentinel("invalid input")
 )
 
-func processOrder(orderID string) error {
-    // Create a displayable error
-    displayErr := errx.NewDisplayable("Order not found")
-    
-    // Wrap with context and classification
-    return errx.Wrap("failed to process order", displayErr, ErrNotFound)
+func processOrder(orderID string, cause error) error {
+    // Attach context, a user-safe message, attributes, and a classification —
+    // all in one idiomatic variadic call.
+    return errx.Wrap("failed to process order", cause,
+        errx.NewDisplayable("Order not found"),
+        errx.Attrs("order_id", orderID),
+        ErrNotFound,
+    )
 }
 
 func main() {
-    err := processOrder("12345")
-    
-    // Check error classification
+    err := processOrder("12345", errors.New("no rows in result set"))
+
+    // Branch on the classification — the sentinel text never pollutes the message.
     if errors.Is(err, ErrNotFound) {
-        fmt.Println("Resource was not found")
+        fmt.Println("resource was not found")
     }
-    
-    // Extract displayable message
-    if errx.IsDisplayable(err) {
-        msg := errx.DisplayText(err)
-        fmt.Println("User-safe message:", msg)
+
+    // Extract the user-safe message (empty string if none — never leaks internals).
+    if msg := errx.DisplayTextOrEmpty(err); msg != "" {
+        fmt.Println("user message:", msg) // "Order not found"
     }
-    
-    // Full error for logging
-    fmt.Println("Full error:", err)
+
+    // Pull structured attributes for logging.
+    attrs := errx.ExtractAttrs(err) // [{order_id 12345}]
+
+    // The full internal chain is still there for your logs.
+    fmt.Println("full error:", err) // "failed to process order: no rows in result set"
+    _ = attrs
 }
 ```
 
-For the common case of creating a brand new error and classifying it in one step, use `ClassifyNew`:
+For creating a brand-new error and classifying it in one step (no `cause` to wrap), use
+`ClassifyNew`:
 
 ```go
-var (
-    ErrNotFound = errx.NewSentinel("resource not found")
-    ErrDatabase = errx.NewSentinel("database error")
-)
-
 err := errx.ClassifyNew("user record missing", ErrNotFound, ErrDatabase)
 // equivalent to: errx.Classify(errors.New("user record missing"), ErrNotFound, ErrDatabase)
 ```
 
 ## Core Concepts
 
-### Classification Sentinels
+errx gives you three building blocks. Each is a `Classified` value, so they all compose
+as variadic arguments to `Wrap`, `Classify`, and `ClassifyNew`.
 
-Classification sentinels let you identify error types without adding text to the error message chain.
+### Classification sentinels
+
+Sentinels identify error *types* without adding text to the error message. Check them with
+the standard `errors.Is`.
 
 ```go
-// Define sentinels
 var (
     ErrDatabase   = errx.NewSentinel("database error")
-    ErrNetwork    = errx.NewSentinel("network error")
     ErrValidation = errx.NewSentinel("validation error")
 )
 
-// Use Classify to classify an error without adding context
 func fetchData() error {
-    err := db.Execute("SELECT * FROM data")
-    if err != nil {
-        return errx.Classify(err, ErrDatabase)
+    if err := db.Execute("SELECT …"); err != nil {
+        return errx.Classify(err, ErrDatabase) // classify, no extra context text
     }
     return nil
 }
 
-// Use Wrap to add both context and classification
-func getData(id string) error {
-    err := fetchData()
-    if err != nil {
-        return errx.Wrap("failed to get data", err, ErrDatabase)
-    }
-    return nil
-}
-
-// Check the classification
-err := getData("123")
 if errors.Is(err, ErrDatabase) {
-    // Handle database error
+    // handle database error
 }
 ```
 
-**When to use `Classify` vs `Wrap`:**
-- Use `Classify` when the error message is already clear and you just need to classify it
-- Use `Wrap` when you need to add contextual information about where/why the error occurred
+**`Classify` vs `Wrap`:** use `Classify` when the message is already clear and you only
+need to tag it; use `Wrap` when you also want to add context about where/why it happened.
 
-### Hierarchical Sentinels
+#### Hierarchical sentinels
 
-Create hierarchical error taxonomies by passing parent sentinels to `NewSentinel`:
-
-```go
-var (
-    // Parent categories
-    ErrRetryable    = errx.NewSentinel("retryable")
-    ErrPermanent    = errx.NewSentinel("permanent")
-
-    // Child sentinels with parents
-    ErrTimeout      = errx.NewSentinel("timeout", ErrRetryable)
-    ErrRateLimit    = errx.NewSentinel("rate limit", ErrRetryable)
-    ErrNotFound     = errx.NewSentinel("not found", ErrPermanent)
-    ErrForbidden    = errx.NewSentinel("forbidden", ErrPermanent)
-)
-
-func handleRequest() error {
-    err := makeAPICall()
-    
-    // Check for specific error
-    if errors.Is(err, ErrTimeout) {
-        // Retry with backoff
-        return retryWithBackoff()
-    }
-    
-    // Check for general category
-    if errors.Is(err, ErrRetryable) {
-        // Any retryable error
-        return retry()
-    }
-    
-    // Check for permanent errors
-    if errors.Is(err, ErrPermanent) {
-        // Don't retry
-        return err
-    }
-    
-    return err
-}
-```
-
-**Multiple Parent Sentinels:**
-
-You can also create sentinels with multiple parents for multi-dimensional classification:
+Pass parent sentinels to build a taxonomy. A child matches itself *and* every parent.
 
 ```go
 var (
-    // Classification dimensions
     ErrRetryable = errx.NewSentinel("retryable")
-    ErrDatabase  = errx.NewSentinel("database")
-    ErrNetwork   = errx.NewSentinel("network")
+    ErrPermanent = errx.NewSentinel("permanent")
 
-    // Sentinels with multiple parents
-    ErrDatabaseTimeout = errx.NewSentinel("database timeout", ErrDatabase, ErrRetryable)
-    ErrNetworkTimeout  = errx.NewSentinel("network timeout", ErrNetwork, ErrRetryable)
+    ErrTimeout   = errx.NewSentinel("timeout", ErrRetryable)
+    ErrRateLimit = errx.NewSentinel("rate limit", ErrRetryable)
+    ErrNotFound  = errx.NewSentinel("not found", ErrPermanent)
 )
 
-// Now you can check errors along multiple dimensions
-err := query()
-if errors.Is(err, ErrDatabase) {
-    // Handle any database error
-}
-if errors.Is(err, ErrRetryable) {
-    // Handle any retryable error (database or network)
+switch {
+case errors.Is(err, ErrTimeout):
+    return retryWithBackoff() // specific
+case errors.Is(err, ErrRetryable):
+    return retry()            // any retryable error
+case errors.Is(err, ErrPermanent):
+    return err                // don't retry
 }
 ```
 
-### Displayable Messages
+Sentinels can have **multiple parents** for multi-dimensional classification:
 
-Separate user-safe messages from internal error details:
+```go
+var (
+    ErrRetryable       = errx.NewSentinel("retryable")
+    ErrDatabase        = errx.NewSentinel("database")
+    ErrDatabaseTimeout = errx.NewSentinel("database timeout", ErrDatabase, ErrRetryable)
+)
+
+errors.Is(err, ErrDatabase)  // true for any database error
+errors.Is(err, ErrRetryable) // true for any retryable error
+```
+
+### Displayable messages
+
+Keep user-safe messages separate from internal detail, and extract them anywhere up the
+chain.
 
 ```go
 func validateEmail(email string) error {
@@ -233,573 +227,381 @@ func validateEmail(email string) error {
     }
     return nil
 }
-
-func createAccount(email string) error {
-    err := validateEmail(email)
-    if err != nil {
-        // Add internal context
-        return errx.Wrap("account creation failed", err, ErrValidation)
-    }
-    return nil
-}
-
-// In your API handler
-func handleCreateAccount(w http.ResponseWriter, r *http.Request) {
-    err := createAccount(email)
-    if err != nil {
-        // Extract user-safe message
-        userMsg := "An error occurred"
-        if errx.IsDisplayable(err) {
-            userMsg = errx.DisplayText(err)
-        }
-
-        // Log full error internally
-        log.Error("account creation failed", "error", err)
-        
-        // Send safe message to user
-        http.Error(w, userMsg, http.StatusBadRequest)
-    }
-}
 ```
 
-### Structured Attributes
+Three ways to read it back, by how cautious you need to be:
 
-Attach key-value metadata for structured logging:
+```go
+errx.IsDisplayable(err)                  // does the chain carry a user-safe message?
+errx.DisplayText(err)                     // the message, or err.Error() on a miss
+errx.DisplayTextDefault(err, "Oops")      // the message, or your fallback on a miss
+errx.DisplayTextOrEmpty(err)              // the message, or "" on a miss (never leaks internals)
+```
+
+> **Security note:** `DisplayText` falls back to the *full* `err.Error()` when no
+> displayable message is present, which can leak internal context (DB errors, paths) to
+> users. For untrusted, user-facing surfaces prefer `DisplayTextOrEmpty` (pick a localized
+> fallback at the response layer) or `DisplayTextDefault`.
+
+### Structured attributes
+
+Attach key/value metadata for logging without cluttering the message.
 
 ```go
 func processPayment(userID string, amount float64) error {
     if amount < 0 {
-        // Create attributed error
-        attrErr := errx.Attrs(
-            "user_id", userID,
-            "amount", amount,
-            "currency", "USD",
+        return errx.ClassifyNew("payment validation failed",
+            errx.NewDisplayable("Amount must be positive"),
+            errx.Attrs("user_id", userID, "amount", amount, "currency", "USD"),
+            ErrValidation,
         )
-        return errx.Wrap("payment validation failed", attrErr, ErrValidation)
     }
     return nil
 }
 
-// Extract attributes for logging
-err := processPayment("user123", -50.0)
-if errx.HasAttrs(err) {
-    attrs := errx.ExtractAttrs(err)
-    log.Error("payment failed", "error", err, "attributes", attrs)
+attrs := errx.ExtractAttrs(err) // AttrList: [{user_id …}, {amount …}, …]
+```
+
+#### Integration with `slog`
+
+`AttrList` converts directly for structured logging:
+
+```go
+attrs := errx.ExtractAttrs(err)
+
+// Most efficient — use with LogAttrs:
+logger.LogAttrs(ctx, slog.LevelError, "operation failed", attrs.ToSlogAttrs()...)
+
+// Convenient — use with Error/Info/Warn:
+logger.Error("operation failed", attrs.ToSlogArgs()...)
+```
+
+For loggers that take flat `key, value, …` variadics (zap's `SugaredLogger`, logrus, etc.)
+use `ToKVArgs`:
+
+```go
+sugar.Errorw("operation failed", attrs.ToKVArgs()...)
+```
+
+## The idiomatic combined pattern
+
+The whole point of errx: classification, a user-safe message, and attributes attached in a
+single call. There is **no builder and no intermediate variables** — `NewDisplayable`,
+`Attrs`, and sentinels are all `Classified`, so they slot straight into the variadic.
+
+```go
+func authenticateUser(username, password string) error {
+    user, err := findUser(username)
+    if err != nil {
+        // We have a cause to wrap → Wrap.
+        return errx.Wrap("authentication failed", err,
+            errx.NewDisplayable("Invalid username or password"),
+            errx.Attrs("username", username, "reason", "user_not_found"),
+            ErrUnauthorized,
+        )
+    }
+
+    if !user.CheckPassword(password) {
+        // No underlying error → ClassifyNew (Wrap would return nil on a nil cause).
+        return errx.ClassifyNew("password check failed",
+            errx.NewDisplayable("Invalid username or password"),
+            errx.Attrs("username", username, "reason", "wrong_password"),
+            ErrUnauthorized,
+        )
+    }
+    return nil
 }
 ```
 
-#### Integration with slog
+**The one rule to remember:**
 
-Convert `errx.AttrList` for seamless integration with structured logging. Two methods are provided:
+| You have… | Use | Because |
+|---|---|---|
+| an existing `cause` to wrap | `errx.Wrap("ctx", cause, …)` | adds context over the cause |
+| no cause — you're creating the error | `errx.ClassifyNew("ctx", …)` | `Wrap` returns `nil` when `cause == nil` |
 
-**Option 1: `ToSlogAttrs()` - Most efficient (recommended)**
-
-Use with `Logger.LogAttrs` for best performance and type safety:
+Reading it all back:
 
 ```go
-err := errx.Attrs("user_id", 123, "action", "delete")
-attrs := errx.ExtractAttrs(err)
-
-// Convert to []slog.Attr
-slogAttrs := attrs.ToSlogAttrs()
-
-// Use with LogAttrs (most efficient)
-logger := slog.Default()
-logger.LogAttrs(context.Background(), slog.LevelError, "operation failed", slogAttrs...)
+errors.Is(err, ErrUnauthorized)  // true
+errx.DisplayTextOrEmpty(err)     // "Invalid username or password"
+err.Error()                       // "authentication failed: <internal cause>"
+errx.ExtractAttrs(err)            // [{username …}, {reason …}]
 ```
 
-**Option 2: `ToSlogArgs()` - Convenient**
+## Aggregating errors
 
-Use with `Error`, `Info`, `Warn` methods for convenience:
+errx works transparently with multi-error trees. The attribute and displayable helpers
+traverse `errors.Join` branches out of the box, so you can compose with the standard
+library directly:
 
 ```go
-err := errx.Attrs("user_id", 123, "action", "delete")
-attrs := errx.ExtractAttrs(err)
-
-// Convert to []any
-slogArgs := attrs.ToSlogArgs()
-
-// Use with convenience methods
-logger := slog.Default()
-logger.Error("operation failed", slogArgs...)
+err := errx.Classify(errors.Join(item1Err, item2Err), ErrBatch)
+errors.Is(err, ErrBatch)   // true
+errx.ExtractAttrs(err)     // attributes from every branch
 ```
 
-### Stack Traces (Optional)
-
-The `stacktrace` subpackage provides optional stack trace support while keeping the core `errx` package minimal and zero-dependency:
+For convenience, `errx.Join` is an aggregation root that mirrors `errors.Join` (it drops
+nil entries and returns `nil` if every entry is nil) but lives in the errx namespace so
+you can classify the group with the existing API:
 
 ```go
-import (
-    "github.com/go-extras/errx"
-    "github.com/go-extras/errx/stacktrace"
-)
+var ErrBatch = errx.NewSentinel("batch failed")
 
-// Option 1: Per-error opt-in using Here()
+err := errx.Classify(errx.Join(item1Err, item2Err), ErrBatch, errx.Attrs("count", 2))
+```
+
+`errx.Join` is intentionally orthogonal to classification — keep `Join` for aggregation and
+reach for `Classify`/`Wrap` to tag the result, exactly as above. The JSON subpackage
+serializes joined members into the `causes` field automatically.
+
+## Optional subpackages
+
+The core stays zero-dependency. These subpackages add capabilities only when you import
+them.
+
+### Stack traces — `stacktrace`
+
+```go
+import "github.com/go-extras/errx/stacktrace"
+
+// Per-error opt-in:
 err := errx.Wrap("operation failed", cause, ErrNotFound, stacktrace.Here())
 
-// Option 2: Automatic capture with stacktrace.Wrap()
+// Or capture automatically:
 err := stacktrace.Wrap("operation failed", cause, ErrNotFound)
-
-// Option 3: Create + classify + capture stack in one call
 err := stacktrace.ClassifyNew("user record missing", ErrNotFound)
 
-// Extract and use stack traces
-frames := stacktrace.Extract(err)
-if frames != nil {
-    for _, frame := range frames {
-        fmt.Printf("%s:%d %s\n", frame.File, frame.Line, frame.Function)
-    }
+// Extract frames (the primary access path):
+for _, frame := range stacktrace.Extract(err) {
+    fmt.Printf("%s:%d %s\n", frame.File, frame.Line, frame.Function)
 }
 ```
 
-**Key features:**
-- **Opt-in**: Stack traces are only captured when explicitly requested
-- **Zero overhead**: Core `errx` package remains dependency-free and fast
-- **Composable**: Works seamlessly with all other `errx` features (sentinels, displayable, attributes)
-- **Two usage patterns**: Per-error with `Here()` or automatic with `stacktrace.Wrap()`
+Traces are **opt-in** so the core package stays dependency-free and fast, and they compose
+with every other feature. The captured trace also implements `fmt.Formatter`, so a trace
+value renders frame-per-line under `%+v`.
 
-See the [stacktrace package documentation](https://pkg.go.dev/github.com/go-extras/errx/stacktrace) for more details.
+See the [stacktrace docs](https://pkg.go.dev/github.com/go-extras/errx/stacktrace).
 
-### JSON Serialization (json package)
-
-The `json` subpackage provides JSON serialization capabilities for errx errors while maintaining the zero-dependency principle of the core package:
+### JSON serialization — `json`
 
 ```go
-import (
-    "github.com/go-extras/errx"
-    errxjson "github.com/go-extras/errx/json"
-)
+import errxjson "github.com/go-extras/errx/json"
 
-// Create a complex error with all features
-displayErr := errx.NewDisplayable("Service temporarily unavailable")
-attrErr := errx.Attrs("retry_count", 3, "host", "localhost")
-err := errx.Wrap("database operation failed", displayErr, attrErr, ErrTimeout)
-
-// Serialize to JSON
 jsonBytes, _ := errxjson.Marshal(err)
-
-// Pretty print
-jsonBytes, _ := errxjson.MarshalIndent(err, "", "  ")
+pretty, _   := errxjson.MarshalIndent(err, "", "  ")
 ```
 
-**Key features:**
-- **Comprehensive serialization**: Handles all errx error types (sentinels, displayable, attributes, stack traces)
-- **Zero dependencies**: Uses only Go's standard library `encoding/json`
-- **Configurable**: Options for max depth, max stack frames, and filtering
-- **Safe**: Includes circular reference detection and depth limits
-
-**Configuration options:**
+It serializes the whole picture — message, display text, sentinels, attributes, stack
+frames, and multi-error `causes` — using only `encoding/json`, with circular-reference and
+depth protection. Options let you shape and **redact** the output, which matters for
+PII-sensitive pipelines:
 
 ```go
-// Limit error chain depth
-jsonBytes, _ := errxjson.Marshal(err, errxjson.WithMaxDepth(16))
-
-// Limit stack frames
-jsonBytes, _ := errxjson.Marshal(err, errxjson.WithMaxStackFrames(10))
-
-// Exclude standard errors
-jsonBytes, _ := errxjson.Marshal(err, errxjson.WithIncludeStandardErrors(false))
-```
-
-See the [json package documentation](https://pkg.go.dev/github.com/go-extras/errx/json) for more details.
-
-### Standard Error Compatibility (compat package)
-
-The `compat` subpackage provides an alternative API that accepts standard Go `error` interface instead of requiring `errx.Classified` types. This is useful for:
-
-- **Migration**: Easier transition from existing error handling code
-- **Third-party integration**: Working with libraries that use standard errors
-- **Flexibility**: Preferring standard error interface over type-safe classifications
-
-```go
-import (
-    "errors"
-    "github.com/go-extras/errx/compat"
-)
-
-// Define classification errors using standard errors
-var (
-    ErrNotFound   = errors.New("not found")
-    ErrDatabase   = errors.New("database error")
-    ErrValidation = errors.New("validation error")
-)
-
-// Use compat functions with standard errors
-func fetchUser(id string) error {
-    err := db.Query(id)
-    if err != nil {
-        return compat.Wrap("failed to fetch user", err, ErrNotFound, ErrDatabase)
+// Redact sensitive attribute values during serialization:
+redact := func(key string, v any) any {
+    if key == "password" || key == "token" {
+        return "<redacted>"
     }
-    return nil
+    return v
 }
-
-// Check classifications using standard errors.Is
-if errors.Is(err, ErrNotFound) {
-    // Handle not found case
-}
-
-// One-step create + classify with standard errors
-err := compat.ClassifyNew("user record missing", ErrNotFound, ErrDatabase)
+jsonBytes, _ := errxjson.Marshal(err,
+    errxjson.WithAttributeValueTransformer(redact),
+    errxjson.WithMaxDepth(16),            // bound chain depth
+    errxjson.WithMaxStackFrames(10),      // bound stack frames
+    errxjson.WithStackTrace(false),       // drop stack traces entirely
+    errxjson.WithAttributes(false),       // drop attributes entirely
+    errxjson.WithSentinels(false),        // drop sentinel text
+    errxjson.WithStackTraceTrimPaths("/build/"), // strip build-host path prefixes
+    errxjson.WithMaxMessageBytes(1024),   // UTF-8-safe message truncation
+)
 ```
 
-**Key features:**
-- **Accepts any error type**: Works with `errors.New()`, third-party errors, etc.
-- **Preserves error identity**: `errors.Is()` and `errors.As()` work correctly
-- **Seamless integration**: Can mix standard errors with `errx.Classified` types
-- **Same functionality**: Supports attributes, displayable errors, and all errx features
+See the [json docs](https://pkg.go.dev/github.com/go-extras/errx/json).
 
-**Tradeoffs:**
-- ✅ More flexible for codebases using standard error interface
-- ✅ Easier migration path from existing code
-- ⚠️ Less type safety - can accidentally pass non-classification errors
-- ⚠️ Slightly more overhead due to additional wrapping layer
+### Standard-error compatibility — `compat`
 
-**When to use:**
-- Use `compat` when migrating existing code or integrating with third-party libraries
-- Use the main `errx` package for new code where type safety is preferred
+The `compat` subpackage mirrors the core API but accepts plain `error` values instead of
+`Classified`, easing migration and third-party integration.
 
-See the [compat package documentation](https://pkg.go.dev/github.com/go-extras/errx/compat) for more details.
+```go
+import "github.com/go-extras/errx/compat"
 
-## Complete Example
+var ErrNotFound = errors.New("not found") // plain stdlib errors
+
+err := compat.Wrap("failed to fetch user", cause, ErrNotFound)
+errors.Is(err, ErrNotFound) // true
+```
+
+**Tradeoffs:** more flexible and easier to migrate to, but less type-safe (you can pass a
+non-classification error by accident) and slightly heavier. Use `compat` when migrating or
+integrating; use the core package for new, type-safe code. See the
+[compat docs](https://pkg.go.dev/github.com/go-extras/errx/compat).
+
+## Complete example: an HTTP handler
 
 ```go
 package main
 
 import (
     "errors"
-    "fmt"
+    "log/slog"
+    "net/http"
+
     "github.com/go-extras/errx"
 )
 
-// Define error taxonomy
 var (
-    // Top-level categories
-    ErrClient = errx.NewSentinel("client error")
-    ErrServer = errx.NewSentinel("server error")
-
-    // Specific errors
+    ErrClient       = errx.NewSentinel("client error")
+    ErrServer       = errx.NewSentinel("server error")
     ErrNotFound     = errx.NewSentinel("not found", ErrClient)
     ErrUnauthorized = errx.NewSentinel("unauthorized", ErrClient)
     ErrDatabase     = errx.NewSentinel("database", ErrServer)
 )
 
-// Data layer - adds attributes
+// Data layer: classify + attach attributes in one call.
 func findUserInDB(userID string) error {
-    // Simulate database error
-    dbErr := errors.New("connection timeout")
-    attrErr := errx.Attrs("user_id", userID, "operation", "select")
-    return errx.Classify(dbErr, attrErr)
-}
-
-// Service layer - adds classification and context
-func getUser(userID string) error {
-    err := findUserInDB(userID)
-    if err != nil {
-        return errx.Wrap("failed to find user", err, ErrDatabase)
-    }
-    return nil
-}
-
-// API layer - adds displayable message
-func handleGetUser(userID string) error {
-    err := getUser(userID)
-    if err != nil {
-        displayErr := errx.NewDisplayable("User not found")
-        return errx.Classify(err, displayErr, ErrNotFound)
-    }
-    return nil
-}
-
-func main() {
-    err := handleGetUser("user123")
-    
-    if err != nil {
-        // Determine status code from classification
-        statusCode := 500
-        switch {
-        case errors.Is(err, ErrNotFound):
-            statusCode = 404
-        case errors.Is(err, ErrUnauthorized):
-            statusCode = 401
-        case errors.Is(err, ErrClient):
-            statusCode = 400
-        }
-        
-        // Get user-safe message
-        userMsg := "An internal error occurred"
-        if errx.IsDisplayable(err) {
-            userMsg = errx.DisplayText(err)
-        }
-        
-        // Extract attributes for logging
-        if errx.HasAttrs(err) {
-            attrs := errx.ExtractAttrs(err)
-            fmt.Printf("Error: %v, Status: %d, Attrs: %v\n", 
-                err, statusCode, attrs)
-        }
-        
-        // Send response
-        fmt.Printf("HTTP %d: %s\n", statusCode, userMsg)
-    }
-}
-```
-
-## Best Practices
-
-### 1. Define Sentinels at Package Level
-
-```go
-package orders
-
-var (
-    ErrOrderNotFound = errx.NewSentinel("order not found")
-    ErrOrderExpired  = errx.NewSentinel("order expired")
-)
-```
-
-### 2. Add Displayable Messages at Domain Boundaries
-
-Create displayable errors where you validate input or detect user-relevant conditions:
-
-```go
-func validateOrder(order Order) error {
-    if order.Total < 0 {
-        return errx.NewDisplayable("Order total cannot be negative")
-    }
-    return nil
-}
-```
-
-### 3. Use Classify to Preserve Clear Messages
-
-```go
-// The validation error already has a clear message
-err := validateOrder(order)
-if err != nil {
-    // Just add classification, don't wrap
-    return errx.Classify(err, ErrInvalid)
-}
-```
-
-### 4. Use Wrap to Add Context
-
-```go
-func processOrder(order Order) error {
-    err := saveOrder(order)
-    if err != nil {
-        // Add context about what we were doing
-        return errx.Wrap("failed to process order", err, ErrDatabase)
-    }
-    return nil
-}
-```
-
-### 5. Check Sentinels from Specific to General
-
-```go
-switch {
-case errors.Is(err, ErrDatabaseTimeout):
-    // Handle specific timeout
-case errors.Is(err, ErrDatabase):
-    // Handle any database error
-case errors.Is(err, ErrServer):
-    // Handle any server error
-}
-```
-
-### 6. Use Attributes for Structured Logging
-
-```go
-// Attach attributes at the point where context is available
-if err != nil {
-    return errx.Classify(
-        err,
-        errx.Attrs(
-            "request_id", reqID,
-            "user_id", userID,
-            "operation", "create_order",
-        ),
+    cause := errors.New("connection timeout")
+    return errx.Wrap("query failed", cause,
+        errx.Attrs("user_id", userID, "operation", "select"),
+        ErrDatabase,
     )
 }
-```
 
-### 7. Separate Internal and External Errors
-
-```go
-func apiHandler(w http.ResponseWriter, r *http.Request) {
-    err := businessLogic()
-    if err != nil {
-        // Always log full internal error
-        if errx.HasAttrs(err) {
-            attrs := errx.ExtractAttrs(err)
-            log.Error("operation failed", "error", err, "attrs", attrs)
-        } else {
-            log.Error("operation failed", "error", err)
-        }
-        
-        // Only send displayable messages to users
-        userMsg := "An error occurred"
-        if errx.IsDisplayable(err) {
-            userMsg = errx.DisplayText(err)
-        }
-        http.Error(w, userMsg, determineStatusCode(err))
+// API layer: add the user-facing message and a precise classification.
+func getUser(userID string) error {
+    if err := findUserInDB(userID); err != nil {
+        return errx.Wrap("failed to get user", err,
+            errx.NewDisplayable("User not found"),
+            ErrNotFound,
+        )
     }
-}
-```
-
-## Pattern: Combined Classification and Display
-
-The most powerful pattern combines all three features:
-
-```go
-func authenticateUser(username, password string) error {
-    user, err := findUser(username)
-    if err != nil {
-        // Create displayable error
-        displayErr := errx.NewDisplayable("Invalid username or password")
-        // Add internal context
-        wrappedErr := errx.Wrap("authentication failed", displayErr, ErrUnauthorized)
-        // Add debugging attributes
-        attrErr := errx.Attrs("username", username, "reason", "user_not_found")
-        return errx.Classify(wrappedErr, attrErr)
-    }
-
-    if !user.CheckPassword(password) {
-        displayErr := errx.NewDisplayable("Invalid username or password")
-        wrappedErr := errx.Wrap("password check failed", displayErr, ErrUnauthorized)
-        attrErr := errx.Attrs("username", username, "reason", "wrong_password")
-        return errx.Classify(wrappedErr, attrErr)
-    }
-    
     return nil
 }
 
-// Usage
-err := authenticateUser("alice", "wrong")
+func handleGetUser(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
+    err := getUser(r.PathValue("id"))
+    if err == nil {
+        return
+    }
 
-// Check classification
-errors.Is(err, ErrUnauthorized) // true
+    // Map classification → HTTP status, specific before general.
+    status := http.StatusInternalServerError
+    switch {
+    case errors.Is(err, ErrNotFound):
+        status = http.StatusNotFound
+    case errors.Is(err, ErrUnauthorized):
+        status = http.StatusUnauthorized
+    case errors.Is(err, ErrClient):
+        status = http.StatusBadRequest
+    }
 
-// Get displayable message
-errx.DisplayText(err) // "Invalid username or password"
+    // Log the full internal error with structured attributes.
+    logger.LogAttrs(r.Context(), slog.LevelError, "request failed",
+        errx.ExtractAttrs(err).ToSlogAttrs()...)
 
-// Get full error
-err.Error() // "authentication failed: password check failed: Invalid username or password"
-
-// Get attributes
-attrs := errx.ExtractAttrs(err)
-// Convert to map if needed
-attrMap := make(map[string]any)
-for _, a := range attrs {
-    attrMap[a.Key] = a.Value
-} // map[username:alice reason:wrong_password]
+    // Send only the user-safe message — fall back without leaking internals.
+    msg := errx.DisplayTextOrEmpty(err)
+    if msg == "" {
+        msg = "An error occurred"
+    }
+    http.Error(w, msg, status)
+}
 ```
 
-## API Documentation
+## Best practices
 
-Full API documentation is available at [pkg.go.dev/github.com/go-extras/errx](https://pkg.go.dev/github.com/go-extras/errx).
+1. **Define sentinels at package level** — they're identity-based; create them once.
+2. **Add displayable messages at domain boundaries** — where you validate input or detect
+   user-relevant conditions.
+3. **`Classify` to preserve a clear message; `Wrap` to add context.**
+4. **`Wrap` when you have a cause, `ClassifyNew` when you're creating the error** (see the
+   table above).
+5. **Check sentinels specific → general** in `switch` statements.
+6. **Use `DisplayTextOrEmpty` on user-facing surfaces** to avoid leaking internal detail.
+7. **Log attributes with `slog`** via `ToSlogAttrs`/`ToSlogArgs`/`ToKVArgs`.
 
-### Core Functions
+## API reference
 
-Signatures below mirror the Go source. The core package uses the type-safe `Classified` interface for sentinels and classifications; see the [`compat` subpackage](#standard-error-compatibility-compat-package) when you need to pass plain `error` values instead.
+Full docs: [pkg.go.dev/github.com/go-extras/errx](https://pkg.go.dev/github.com/go-extras/errx).
+The core package uses the type-safe `Classified` interface; see [`compat`](#standard-error-compatibility--compat)
+when you need to pass plain `error` values.
 
-#### Error Creation
+### Creation
 
-- **`NewSentinel(text string, parents ...Classified) Classified`**
-  Creates a new sentinel for classification. Supports hierarchical error taxonomies via optional parent sentinels.
+- **`NewSentinel(text string, parents ...Classified) Classified`** — a classification
+  sentinel, optionally hierarchical.
+- **`NewDisplayable(message string) Classified`** — a user-safe message.
+- **`Attrs(attrs ...any) Classified`** — structured attributes from alternating key/value
+  pairs, `Attr` structs, or `[]Attr`/`AttrList` slices.
+- **`FromAttrMap(attrs AttrMap) Classified`** — attributes from a map (ordering is
+  non-deterministic).
 
-- **`NewDisplayable(message string) Classified`**
-  Creates a user-safe displayable error message.
+### Wrapping & aggregation
 
-- **`Attrs(attrs ...any) Classified`**
-  Creates an error with structured key-value attributes. Accepts alternating key/value pairs, `Attr` structs, or `[]Attr`/`AttrList` slices.
+- **`Wrap(text string, cause error, classifications ...Classified) error`** — add context
+  and classifications. Returns `nil` if `cause` is `nil`.
+- **`Classify(cause error, classifications ...Classified) error`** — attach classifications
+  with no extra context. Returns `nil` if `cause` is `nil`.
+- **`ClassifyNew(text string, classifications ...Classified) error`** — create and classify
+  in one step.
+- **`Join(errs ...error) error`** — aggregate multiple errors into one (`errors.Join`-style,
+  with `Unwrap() []error`). Drops nil entries; returns `nil` if all are nil.
 
-- **`FromAttrMap(attrs AttrMap) Classified`**
-  Creates an attributed error from a map of key-value pairs. Attribute ordering is non-deterministic.
+### Inspection
 
-#### Error Wrapping
+- **`IsDisplayable(err error) bool`** / **`DisplayText(err error) string`**
+- **`DisplayTextDefault(err error, def string) string`** — fallback on a miss.
+- **`DisplayTextOrEmpty(err error) string`** — `""` on a miss; safe for user surfaces.
+- **`HasAttrs(err error) bool`** / **`ExtractAttrs(err error) AttrList`**
+- **`(AttrList).ToSlogAttrs() []slog.Attr`** / **`(AttrList).ToSlogArgs() []any`** /
+  **`(AttrList).ToKVArgs() []any`**
+- **`CarrierClassifications(err error) ([]Classified, bool)`** — inspect the classifications
+  attached at one level of the chain (used by the json subpackage; treat the slice as
+  read-only).
 
-- **`Wrap(text string, cause error, classifications ...Classified) error`**
-  Wraps an error with context text and optional classifications. Returns `nil` if `cause` is `nil`.
-
-- **`Classify(cause error, classifications ...Classified) error`**
-  Attaches one or more classifications to an existing error without adding context text. Returns `nil` if `cause` is `nil`.
-
-- **`ClassifyNew(text string, classifications ...Classified) error`**
-  Creates a new error with the given text and immediately classifies it. Equivalent to `errx.Classify(errors.New(text), classifications...)` but more concise.
-
-#### Error Inspection
-
-- **`IsDisplayable(err error) bool`**
-  Checks if an error chain contains a displayable message.
-
-- **`DisplayText(err error) string`**
-  Extracts the displayable message from an error chain.
-
-- **`DisplayTextDefault(err error, def string) string`**
-  Extracts the displayable message or returns a fallback string when no displayable error is present.
-
-- **`HasAttrs(err error) bool`**
-  Checks if an error chain contains structured attributes.
-
-- **`ExtractAttrs(err error) AttrList`**
-  Extracts all attributes from an error chain.
-
-- **`(AttrList).ToSlogAttrs() []slog.Attr`**
-  Converts extracted attributes to `[]slog.Attr` for use with `slog.Logger.LogAttrs`.
-
-- **`(AttrList).ToSlogArgs() []any`**
-  Converts extracted attributes to `[]any` for use with slog convenience methods like `Logger.Error`.
-
-## Use Cases
-
-- **API error handling**: Separate internal errors from user-facing messages
-- **Microservices**: Classify errors for proper HTTP status code mapping
-- **Structured logging**: Attach rich context to errors for debugging
-- **Error monitoring**: Track error categories and patterns
-- **Domain-driven design**: Create error taxonomies that match your domain
-
-## Comparison with Standard Errors
+## Comparison with standard errors
 
 ```go
 // Standard approach
 err := errors.New("user not found")
 wrapped := fmt.Errorf("failed to get user: %w", err)
 
-// errx approach
-displayErr := errx.NewDisplayable("User not found")
-classifiedErr := errx.Wrap("failed to get user", displayErr, ErrNotFound)
-
-// Benefits:
-// - Programmatic checking: errors.Is(err, ErrNotFound)
-// - Clean user messages: errx.DisplayText(err)
-// - Full internal context: err.Error()
-// - Structured metadata: errx.ExtractAttrs(err)
+// errx approach — one call, three extra capabilities
+err := errx.Wrap("failed to get user", cause,
+    errx.NewDisplayable("User not found"),
+    errx.Attrs("user_id", id),
+    ErrNotFound,
+)
+// errors.Is(err, ErrNotFound) • errx.DisplayTextOrEmpty(err) •
+// errx.ExtractAttrs(err) • err.Error() still has full internal context
 ```
+
+Migrating from stdlib or `pkg/errors`? Start with the [`compat`](#standard-error-compatibility--compat)
+subpackage so you can pass the plain sentinel `error` values you already have, then adopt
+the type-safe core where it helps.
+
+## Use cases
+
+- **API error handling** — separate internal errors from user-facing messages.
+- **Microservices** — classify errors for HTTP status mapping.
+- **Structured logging** — attach rich context for debugging.
+- **Error monitoring** — track categories and patterns.
+- **Domain-driven design** — error taxonomies that match your domain.
 
 ## Testing
 
-Run the test suite:
-
 ```bash
-# Run all tests
-go test ./...
-
-# Run tests with race detection
-go test -race ./...
-
-# Run tests with coverage
-go test -cover ./...
+go test ./...            # all tests
+go test -race ./...      # with race detection
+go test -cover ./...     # with coverage
 ```
 
 ## Contributing
 
-Contributions are welcome! Please:
-
-- Open issues for bugs, feature requests, or questions
-- Submit pull requests with clear descriptions and tests
-- Follow the existing code style and conventions
-- Ensure all tests pass and maintain test coverage
+Contributions are welcome! Please open issues for bugs, feature requests, or questions, and
+submit pull requests with clear descriptions, tests, and the existing code style.
 
 ## License
 
@@ -807,4 +609,14 @@ MIT © 2026 Denis Voytyuk — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-This library builds upon Go's standard `errors` package and is inspired by best practices from the Go community for error handling in production systems.
+This library builds on Go's standard `errors` package and the Go community's error-handling
+best practices.
+
+<!-- alternative libraries -->
+[pkgerrors]: https://github.com/pkg/errors
+[crdb]: https://github.com/cockroachdb/errors
+[errorx]: https://github.com/joomcode/errorx
+[failure]: https://github.com/morikuni/failure
+[eris]: https://github.com/rotisserie/eris
+[umultierr]: https://github.com/uber-go/multierr
+[hmultierr]: https://github.com/hashicorp/go-multierror

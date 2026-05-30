@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`errx.Join(errs ...error) error`** — aggregate multiple errors into a single value, mirroring the standard library's `errors.Join` (drops nil entries; returns `nil` when every entry is nil) but in the errx namespace so the aggregate composes with `Classify`/`Wrap`. The result implements `Unwrap() []error`, so `errors.Is`/`errors.As` and errx's `ExtractAttrs`/`HasAttrs`/`DisplayText` traverse every branch, and the `json` subpackage serializes members into `causes`.
+
 ### Changed
 
 - **`stacktrace` subpackage no longer uses `reflect` or `unsafe`** ([#29], [#35]) — `extractCarrierClassifications` now goes through the public `errx.CarrierClassifications` accessor instead of reflecting into the unexported `carrier.classifications` field, mirroring the migration already done in the `json` subpackage ([#17]). A future rename of the unexported `carrier` type can no longer silently drop classification extraction during stack-trace traversal. No exported APIs or behavior change.
+- **README overhaul** — examples now lead with the idiomatic single-call variadic form (classification, displayable message, and attributes attached in one `Wrap`/`ClassifyNew`) instead of multi-step builder-style code. Adds a "Why errx" section comparing errx with alternative libraries (`pkg/errors`, `cockroachdb/errors`, `joomcode/errorx`, `morikuni/failure`, and `eris`), plus new sections covering error aggregation (`errx.Join`), attribute redaction via `WithAttributeValueTransformer`, and non-slog logger integration via `ToKVArgs`.
 
 ## [1.3.0] - 2026-05-17
 
