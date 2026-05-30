@@ -205,6 +205,21 @@ func captureStack(skip, depth int) *traced {
 	return &traced{pcs: out}
 }
 
+// appendTrace returns a new slice containing classifications followed by trace.
+//
+// It always allocates a fresh slice rather than appending in place. Appending to
+// the caller's variadic slice can mutate the caller's backing array when they
+// spread a slice with spare capacity (e.g.
+// `cls := make([]errx.Classified, 0, 4); cls = append(cls, c1); stacktrace.Wrap("x", base, cls...)`).
+// Allocating a fresh slice avoids that aliasing entirely. This is the single
+// place the defensive-copy rationale lives; the trace-capturing helpers call it.
+func appendTrace(classifications []errx.Classified, trace *traced) []errx.Classified {
+	ncls := make([]errx.Classified, len(classifications)+1)
+	copy(ncls, classifications)
+	ncls[len(classifications)] = trace
+	return ncls
+}
+
 // Extract returns stack frames from the first traced error found in the error chain.
 // It traverses the entire error chain (including multi-error branches produced
 // by errors.Join) looking for a traced error or a third-party Tracer
@@ -376,14 +391,7 @@ func Wrap(text string, cause error, classifications ...errx.Classified) error {
 	}
 	// Capture stack with skip=2 to skip Wrap() and runtime.Callers
 	trace := captureStack(2, DefaultMaxDepth)
-	// Defensive copy: appending to the caller's variadic slice can mutate the
-	// caller's backing array when they spread a slice with spare capacity
-	// (e.g. `cls := make([]errx.Classified, 0, 4); cls = append(cls, c1); stacktrace.Wrap("x", base, cls...)`).
-	// Allocating a fresh slice avoids that aliasing entirely.
-	ncls := make([]errx.Classified, len(classifications)+1)
-	copy(ncls, classifications)
-	ncls[len(classifications)] = trace
-	return errx.Wrap(text, cause, ncls...)
+	return errx.Wrap(text, cause, appendTrace(classifications, trace)...)
 }
 
 // WrapDepth is like Wrap but allows the caller to specify the maximum number of
@@ -394,11 +402,7 @@ func WrapDepth(text string, cause error, depth int, classifications ...errx.Clas
 		return nil
 	}
 	trace := captureStack(2, depth)
-	// Defensive copy — see comment on Wrap for the aliasing scenario this avoids.
-	ncls := make([]errx.Classified, len(classifications)+1)
-	copy(ncls, classifications)
-	ncls[len(classifications)] = trace
-	return errx.Wrap(text, cause, ncls...)
+	return errx.Wrap(text, cause, appendTrace(classifications, trace)...)
 }
 
 // Classify attaches one or more classifications to an error, automatically
@@ -419,11 +423,7 @@ func Classify(cause error, classifications ...errx.Classified) error {
 	}
 	// Capture stack with skip=2 to skip Classify() and runtime.Callers
 	trace := captureStack(2, DefaultMaxDepth)
-	// Defensive copy — see comment on Wrap for the aliasing scenario this avoids.
-	ncls := make([]errx.Classified, len(classifications)+1)
-	copy(ncls, classifications)
-	ncls[len(classifications)] = trace
-	return errx.Classify(cause, ncls...)
+	return errx.Classify(cause, appendTrace(classifications, trace)...)
 }
 
 // ClassifyDepth is like Classify but allows the caller to specify the maximum
@@ -434,11 +434,7 @@ func ClassifyDepth(cause error, depth int, classifications ...errx.Classified) e
 		return nil
 	}
 	trace := captureStack(2, depth)
-	// Defensive copy — see comment on Wrap for the aliasing scenario this avoids.
-	ncls := make([]errx.Classified, len(classifications)+1)
-	copy(ncls, classifications)
-	ncls[len(classifications)] = trace
-	return errx.Classify(cause, ncls...)
+	return errx.Classify(cause, appendTrace(classifications, trace)...)
 }
 
 // ClassifyNew creates a new error with the given text and immediately classifies it
@@ -468,11 +464,7 @@ func ClassifyDepth(cause error, depth int, classifications ...errx.Classified) e
 func ClassifyNew(text string, classifications ...errx.Classified) error {
 	// Capture stack with skip=2 to skip ClassifyNew() and runtime.Callers
 	trace := captureStack(2, DefaultMaxDepth)
-	// Defensive copy — see comment on Wrap for the aliasing scenario this avoids.
-	ncls := make([]errx.Classified, len(classifications)+1)
-	copy(ncls, classifications)
-	ncls[len(classifications)] = trace
-	return errx.ClassifyNew(text, ncls...)
+	return errx.ClassifyNew(text, appendTrace(classifications, trace)...)
 }
 
 // ClassifyNewDepth is like ClassifyNew but allows the caller to specify the
@@ -480,9 +472,5 @@ func ClassifyNew(text string, classifications ...errx.Classified) error {
 // DefaultMaxDepth, and values larger than MaxDepth are clamped to MaxDepth.
 func ClassifyNewDepth(text string, depth int, classifications ...errx.Classified) error {
 	trace := captureStack(2, depth)
-	// Defensive copy — see comment on Wrap for the aliasing scenario this avoids.
-	ncls := make([]errx.Classified, len(classifications)+1)
-	copy(ncls, classifications)
-	ncls[len(classifications)] = trace
-	return errx.ClassifyNew(text, ncls...)
+	return errx.ClassifyNew(text, appendTrace(classifications, trace)...)
 }
