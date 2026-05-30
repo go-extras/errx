@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fmt.Formatter` on `Wrap`/`Classify`/`ClassifyNew` results** ([#45]) — errors returned by `errx.Wrap`/`Classify`/`ClassifyNew` (and the matching `stacktrace.Wrap`/`Classify`/`ClassifyNew` convenience functions) now implement `fmt.Formatter`. `fmt.Sprintf("%+v", err)` prints the message followed by any attached stack trace in the de-facto `pkg/errors` style, instead of collapsing to the message; `%v` and `%s` are unchanged, `%q` prints the quoted message. Previously only a bare `stacktrace.Here()` value rendered frames under `%+v` — a *wrapped* or *classified* error (the common case) silently dropped the trace, a surprising regression for codebases migrating from `github.com/pkg/errors` where `log.Printf("%+v", err)` is the idiom for surfacing stacks. Internally the wrap-context layer is now a small errx wrapper rather than `fmt.Errorf`'s `wrapError`; `Error()`, `Unwrap()`, `errors.Is`/`errors.As`, `CarrierClassifications`, and `json` output are byte-for-byte unchanged. Trace-less wraps still print the message only.
+
 - **`errx.Join(errs ...error) error`** — aggregate multiple errors into a single value, mirroring the standard library's `errors.Join` (drops nil entries; returns `nil` when every entry is nil) but in the errx namespace so the aggregate composes with `Classify`/`Wrap`. The result implements `Unwrap() []error`, so `errors.Is`/`errors.As` and errx's `ExtractAttrs`/`HasAttrs`/`DisplayText` traverse every branch, and the `json` subpackage serializes members into `causes`.
 
 ### Changed
@@ -125,6 +127,7 @@ This release lands a large set of improvements across the core package and every
 [#25]: https://github.com/go-extras/errx/pull/25
 [#29]: https://github.com/go-extras/errx/issues/29
 [#35]: https://github.com/go-extras/errx/pull/35
+[#45]: https://github.com/go-extras/errx/issues/45
 
 ## [1.2.1] - 2026-01-31
 

@@ -3,6 +3,7 @@ package stacktrace_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-extras/errx"
 	"github.com/go-extras/errx/stacktrace"
@@ -143,7 +144,7 @@ func ExampleExtract() {
 
 	// Output:
 	// Stack trace (7 frames):
-	//   github.com/go-extras/errx/stacktrace_test.ExampleExtract:129
+	//   github.com/go-extras/errx/stacktrace_test.ExampleExtract:130
 	//   testing.runExample:63
 	//   testing.runExamples:41
 	//   ...
@@ -199,4 +200,27 @@ func Example_integration() {
 	// Is not found: true
 	// Has attributes: true
 	// Has stack trace: true
+}
+
+// ExampleWrap_format demonstrates that an error carrying a stack trace renders
+// the captured frames under the "%+v" verb, mirroring the github.com/pkg/errors
+// idiom. "%v" and "%s" keep printing the message only.
+//
+// Frame file paths and line numbers are machine-specific, so this example
+// asserts on the stable parts of the output rather than the frames themselves.
+func ExampleWrap_format() {
+	baseErr := errors.New("connection refused")
+	err := stacktrace.Wrap("dial database", baseErr)
+
+	verbose := fmt.Sprintf("%+v", err)
+	lines := strings.SplitN(verbose, "\n", 2)
+
+	fmt.Println("message:", lines[0])
+	fmt.Println("has stack trace:", len(lines) > 1 && strings.Contains(lines[1], "\t"))
+	fmt.Printf("plain %%v: %v\n", err)
+
+	// Output:
+	// message: dial database: connection refused
+	// has stack trace: true
+	// plain %v: dial database: connection refused
 }

@@ -376,11 +376,23 @@ err := stacktrace.ClassifyNew("user record missing", ErrNotFound)
 for _, frame := range stacktrace.Extract(err) {
     fmt.Printf("%s:%d %s\n", frame.File, frame.Line, frame.Function)
 }
+
+// Or print pkg/errors-style with %+v:
+fmt.Printf("%+v\n", err)
+// operation failed: user record missing
+// main.fetchUser
+//     /app/user.go:42
+// main.main
+//     /app/main.go:17
 ```
 
 Traces are **opt-in** so the core package stays dependency-free and fast, and they compose
-with every other feature. The captured trace also implements `fmt.Formatter`, so a trace
-value renders frame-per-line under `%+v`.
+with every other feature. Errors that carry a trace implement `fmt.Formatter`: `%+v` prints
+the message followed by the captured frames (de-facto `pkg/errors` style), while `%v` and
+`%s` print the message only. This makes errx a **drop-in target for code migrating off
+`pkg/errors`**, where `log.Printf("%+v", err)` is the standard way to surface stack traces —
+no logging changes required. Errors without a trace (plain `errx.Wrap`/`Classify`) print the
+message only under `%+v`, exactly as before.
 
 See the [stacktrace docs](https://pkg.go.dev/github.com/go-extras/errx/stacktrace).
 
