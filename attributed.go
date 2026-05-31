@@ -382,7 +382,6 @@ func ExtractAttrs(err error) AttrList {
 
 	var allAttrs []Attr
 	visited := make(map[uintptr]bool)
-	attributedErrorsFound := make(map[*attributed]bool)
 
 	// Use a queue for breadth-first traversal to handle multi-errors
 	queue := []error{err}
@@ -391,7 +390,11 @@ func ExtractAttrs(err error) AttrList {
 		current := queue[0]
 		queue = queue[1:]
 
-		// Skip if already visited (avoid cycles)
+		// Skip if already visited (avoid cycles). The visited set is keyed on
+		// pointer identity via errptr.Get, which for an *attributed returns that
+		// same pointer. A shared *attributed reachable through several paths is
+		// therefore deduplicated here — before its attrs are collected below —
+		// so it can never contribute twice.
 		if current != nil {
 			ptr := errptr.Get(current)
 			if visited[ptr] {
@@ -400,12 +403,9 @@ func ExtractAttrs(err error) AttrList {
 			visited[ptr] = true
 		}
 
-		// Check if current error is an attributed error directly
+		// Collect attributes from an attributed error directly.
 		if aErr, ok := current.(*attributed); ok {
-			if !attributedErrorsFound[aErr] {
-				attributedErrorsFound[aErr] = true
-				allAttrs = append(allAttrs, aErr.attrs...)
-			}
+			allAttrs = append(allAttrs, aErr.attrs...)
 		}
 
 		// If this is a carrier with classifications, add them to the queue
