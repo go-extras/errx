@@ -57,9 +57,42 @@ type SerializedError struct {
 }
 
 // SerializedAttr represents a single attribute key-value pair.
+//
+// Value holds the attribute's original Go value (after any configured
+// [AttributeValueTransformer] has run); it is JSON-encoded lazily by
+// [SerializedAttr.MarshalJSON] so that ToSerializedError consumers can still
+// inspect the concrete value before it is serialized.
 type SerializedAttr struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
+}
+
+// attrJSON is the wire shape of a SerializedAttr. The value is carried as a
+// pre-encoded json.RawMessage so the surrounding Marshal embeds it verbatim
+// rather than walking and re-encoding the value structure a second time.
+type attrJSON struct {
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
+}
+
+// MarshalJSON encodes the attribute, JSON-encoding its value exactly once.
+//
+// A value whose JSON encoding fails (for example a func or channel) is replaced
+// with its fmt.Sprintf("%+v", v) form so that a single bad value cannot abort
+// the surrounding Marshal. Doing the encode here, rather than eagerly when the
+// SerializedAttr is built, lets [ToSerializedError] expose the caller's original
+// Go value in [SerializedAttr.Value] while still encoding it only once on the
+// happy path (the previous implementation marshalled each value once just to
+// test serializability and then again via the outer Marshal).
+func (a SerializedAttr) MarshalJSON() ([]byte, error) {
+	raw, err := json.Marshal(a.Value)
+	if err != nil {
+		raw, err = json.Marshal(fmt.Sprintf("%+v", a.Value))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(attrJSON{Key: a.Key, Value: raw})
 }
 
 // SerializedFrame represents a single stack frame.
@@ -362,12 +395,17 @@ func sentinelsForLevel(classifications []errx.Classified, node error) []string {
 	return sentinels
 }
 
-// serializeAttributes extracts and serializes attributes from an error.
-// Attribute values whose JSON encoding fails (e.g. a func() value) are
-// replaced with a fmt.Sprintf("%+v", v) fallback string so a single bad
-// value does not abort the entire marshal. If a non-nil
-// AttributeValueTransformer is configured, it is applied to each value
-// before the JSON-serializability check.
+// serializeAttributes extracts attributes from an error and records them on the
+// result. If a non-nil AttributeValueTransformer is configured, it is applied to
+// each value first.
+//
+// Values are intentionally not JSON-encoded here. Each SerializedAttr keeps the
+// caller's original Go value, and the single JSON encode — plus the
+// fmt.Sprintf("%+v", v) fallback for values that do not encode — happens in
+// [SerializedAttr.MarshalJSON] at marshal time. This keeps one bad value from
+// aborting the whole marshal while avoiding the previous double-encode, where
+// every value was marshalled once just to test serializability and then again
+// by the outer Marshal.
 func serializeAttributes(err error, cfg *config, result *SerializedError) {
 	attrs := errx.ExtractAttrs(err)
 	if len(attrs) == 0 {
@@ -379,25 +417,11 @@ func serializeAttributes(err error, cfg *config, result *SerializedError) {
 		if cfg.attributeValueTransformer != nil {
 			value = cfg.attributeValueTransformer(attr.Key, value)
 		}
-		if !isJSONSerializable(value) {
-			value = fmt.Sprintf("%+v", value)
-		}
 		result.Attributes[i] = SerializedAttr{
 			Key:   attr.Key,
 			Value: value,
 		}
 	}
-}
-
-// isJSONSerializable reports whether v can be encoded by encoding/json
-// without producing an error. nil is treated as serializable (becomes
-// JSON null).
-func isJSONSerializable(v any) bool {
-	if v == nil {
-		return true
-	}
-	_, err := json.Marshal(v)
-	return err == nil
 }
 
 // serializeStackTrace extracts and serializes stack frames from an error.

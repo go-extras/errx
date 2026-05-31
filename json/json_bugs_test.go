@@ -1,6 +1,7 @@
 package json_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -269,4 +270,69 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// TestMarshal_AttrValueMatchesStdlibEncoding pins the serialized attribute value
+// to exactly what encoding/json produces for the same Go value. This guards the
+// single-encode path in SerializedAttr.MarshalJSON: a serializable value must be
+// emitted byte-for-byte as stdlib would encode it, including default HTML
+// escaping (<, >, &), U+2028/U+2029 escaping, sorted map keys, and null.
+func TestMarshal_AttrValueMatchesStdlibEncoding(t *testing.T) {
+	cases := []struct {
+		name string
+		val  any
+	}{
+		{"html", "<b>tom & jerry</b> \"quoted\""},
+		{"unicode", "naïve    résumé →"},
+		{"nestedMap", map[string]any{"b": []string{"x", "y"}, "a": 1, "c": map[string]int{"z": 9, "y": 8}}},
+		{"int", 1234567},
+		{"bool", true},
+		{"nil", nil},
+		{"slice", []int{1, 2, 3, 4, 5}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := json.Marshal(tc.val)
+			if err != nil {
+				t.Fatalf("stdlib Marshal(%#v): %v", tc.val, err)
+			}
+			e := errx.Classify(errors.New("base"), errx.Attrs("k", tc.val))
+			data, err := errxjson.Marshal(e)
+			if err != nil {
+				t.Fatalf("errxjson.Marshal: %v", err)
+			}
+			needle := `"value":` + string(want)
+			if !strings.Contains(string(data), needle) {
+				t.Errorf("output does not embed stdlib encoding\n got:  %s\n want substring: %s", data, needle)
+			}
+		})
+	}
+}
+
+// TestMarshalIndent_CompactsToMarshal verifies that the custom
+// SerializedAttr.MarshalJSON does not break pretty-printing: compacting the
+// indented output must reproduce the compact Marshal output exactly.
+func TestMarshalIndent_CompactsToMarshal(t *testing.T) {
+	e := errx.Classify(errors.New("base"), errx.Attrs(
+		"user", map[string]any{"id": 1, "name": "<alice>", "roles": []string{"a", "b"}},
+		"n", 2,
+		"bad", func() {},
+	))
+
+	compactWant, err := errxjson.Marshal(e)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	indented, err := errxjson.MarshalIndent(e, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, indented); err != nil {
+		t.Fatalf("Compact(indented): %v", err)
+	}
+	if !bytes.Equal(buf.Bytes(), compactWant) {
+		t.Errorf("compacted indent != marshal\n compacted: %s\n marshal:   %s", buf.Bytes(), compactWant)
+	}
 }

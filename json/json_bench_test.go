@@ -71,3 +71,60 @@ func BenchmarkMarshal_FreshStackTrace(b *testing.B) {
 		_, _ = errxjson.Marshal(err)
 	}
 }
+
+// BenchmarkMarshal_AttrsScalar measures Marshal() on an attribute-heavy error
+// whose values are cheap scalars. This is the worst case for the optimisation:
+// per-value encode cost is tiny, so any framing overhead is most visible here.
+func BenchmarkMarshal_AttrsScalar(b *testing.B) {
+	attrs := errx.Attrs(
+		"user_id", 12345,
+		"request_id", "abc-123-def-456-789",
+		"status", 200,
+		"method", "POST",
+		"path", "/api/v1/resource/sub",
+		"latency_ms", 42,
+		"retries", 3,
+		"ok", true,
+	)
+	err := errx.Wrap("operation failed", errors.New("base"), attrs)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = errxjson.Marshal(err)
+	}
+}
+
+// BenchmarkMarshal_AttrsComplex measures Marshal() on an attribute-heavy error
+// whose values are nested maps/structs/slices. Here per-value encode cost
+// dominates, so eliminating the duplicate encode should show the biggest win.
+func BenchmarkMarshal_AttrsComplex(b *testing.B) {
+	type address struct {
+		Street string `json:"street"`
+		City   string `json:"city"`
+		Zip    string `json:"zip"`
+	}
+	attrs := errx.Attrs(
+		"user", map[string]any{
+			"id":    12345,
+			"name":  "Alice Example",
+			"roles": []string{"admin", "user", "auditor"},
+			"prefs": map[string]bool{"dark": true, "beta": false, "email": true},
+		},
+		"address", address{Street: "123 Example Ave", City: "Springfield", Zip: "01234"},
+		"tags", []string{"alpha", "beta", "gamma", "delta", "epsilon"},
+		"scores", map[string]int{"a": 1, "b": 2, "c": 3, "d": 4, "e": 5},
+		"nested", map[string]any{
+			"level1": map[string]any{
+				"level2": map[string]any{
+					"items": []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+				},
+			},
+		},
+	)
+	err := errx.Wrap("operation failed", errors.New("base"), attrs)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = errxjson.Marshal(err)
+	}
+}
