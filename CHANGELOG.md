@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`ExtractAttrs` drops a redundant dedup map** ([#31]) — the breadth-first traversal no longer keeps a secondary `map[*attributed]bool` to guard against double-counting a shared `*attributed`. The primary `visited` set is keyed on pointer identity (`errptr.Get`), which for an `*attributed` is that same pointer, and is checked-and-set at dequeue time before attrs are collected — so a shared instance reachable through several paths was already deduplicated there, and the second map never actually prevented a duplicate. Removes the per-call map setup and the per-node `attributed` bookkeeping, simplifying the loop body (allocation count is unchanged — escape analysis already stack-allocated both maps). Behavior is identical, as the existing diamond/DAG dedup test confirms.
 - **`stacktrace` subpackage no longer uses `reflect` or `unsafe`** ([#29], [#35]) — `extractCarrierClassifications` now goes through the public `errx.CarrierClassifications` accessor instead of reflecting into the unexported `carrier.classifications` field, mirroring the migration already done in the `json` subpackage ([#17]). A future rename of the unexported `carrier` type can no longer silently drop classification extraction during stack-trace traversal. No exported APIs or behavior change.
 - **README overhaul** — examples now lead with the idiomatic single-call variadic form (classification, displayable message, and attributes attached in one `Wrap`/`ClassifyNew`) instead of multi-step builder-style code. Adds a "Why errx" section comparing errx with alternative libraries (`pkg/errors`, `cockroachdb/errors`, `joomcode/errorx`, `morikuni/failure`, and `eris`), plus new sections covering error aggregation (`errx.Join`), attribute redaction via `WithAttributeValueTransformer`, and non-slog logger integration via `ToKVArgs`.
 - **README: "Migrating from `pkg/errors`" section** — documents [`errx-migrate`](https://github.com/go-extras/errx-migrate), the type-aware AST rewriter that converts a `pkg/errors`-based codebase to errx (stack-preserving by default, `-no-stack` for the zero-dependency core), with the API mapping table and install/usage. Frames the move with evidence that `pkg/errors` is unmaintained — the maintainer's own call for new maintainers ([pkg/errors#245](https://github.com/pkg/errors/issues/245)) and its test suite no longer passing on current Go ([pkg/errors#249](https://github.com/pkg/errors/issues/249)) — and links the comparison table's "unmaintained" status to the new section.
@@ -132,6 +133,7 @@ This release lands a large set of improvements across the core package and every
 [#24]: https://github.com/go-extras/errx/pull/24
 [#25]: https://github.com/go-extras/errx/pull/25
 [#29]: https://github.com/go-extras/errx/issues/29
+[#31]: https://github.com/go-extras/errx/issues/31
 [#35]: https://github.com/go-extras/errx/pull/35
 [#43]: https://github.com/go-extras/errx/issues/43
 [#45]: https://github.com/go-extras/errx/issues/45
