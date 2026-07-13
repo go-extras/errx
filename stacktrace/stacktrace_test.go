@@ -129,6 +129,244 @@ func TestWrapWithClassifications(t *testing.T) {
 	}
 }
 
+func TestHereIfCapturesWhenAbsent(t *testing.T) {
+	baseErr := errors.New("base")
+	err := errx.Wrap("ctx", baseErr, stacktrace.HereIf(baseErr))
+
+	if stacktrace.Extract(err) == nil {
+		t.Fatal("expected stack trace when cause had none")
+	}
+}
+
+func TestHereIfNoopWhenPresent(t *testing.T) {
+	baseErr := errors.New("base")
+	traced := stacktrace.Wrap("inner", baseErr)
+	err := errx.Wrap("outer", traced, stacktrace.HereIf(traced))
+
+	all := stacktrace.ExtractAll(err)
+	if len(all) != 1 {
+		t.Fatalf("expected exactly one trace, got %d", len(all))
+	}
+}
+
+func TestWrapIfCapturesWhenAbsent(t *testing.T) {
+	baseErr := errors.New("base")
+	err := stacktrace.WrapIf("operation failed", baseErr)
+
+	if stacktrace.Extract(err) == nil {
+		t.Fatal("expected stack trace when cause had none")
+	}
+	if err.Error() != "operation failed: base" {
+		t.Errorf("unexpected message: %q", err.Error())
+	}
+}
+
+func TestWrapIfSkipsWhenPresent(t *testing.T) {
+	baseErr := errors.New("base")
+	inner := stacktrace.Wrap("inner", baseErr)
+	err := stacktrace.WrapIf("outer", inner)
+
+	all := stacktrace.ExtractAll(err)
+	if len(all) != 1 {
+		t.Fatalf("expected exactly one trace, got %d", len(all))
+	}
+	if err.Error() != "outer: inner: base" {
+		t.Errorf("unexpected message: %q", err.Error())
+	}
+}
+
+func TestWrapIfDoubleWrapSingleTrace(t *testing.T) {
+	baseErr := errors.New("base")
+	err := stacktrace.WrapIf("a", baseErr)
+	err = stacktrace.WrapIf("b", err)
+
+	all := stacktrace.ExtractAll(err)
+	if len(all) != 1 {
+		t.Fatalf("expected exactly one trace after layered WrapIf, got %d", len(all))
+	}
+}
+
+func TestWrapIfNil(t *testing.T) {
+	if err := stacktrace.WrapIf("ctx", nil); err != nil {
+		t.Errorf("expected nil for nil cause, got %v", err)
+	}
+}
+
+func TestWrapIfDepthCapturesWhenAbsent(t *testing.T) {
+	baseErr := errors.New("base")
+	err := stacktrace.WrapIfDepth("deep", baseErr, 8)
+
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Fatal("expected stack trace")
+	}
+	if len(frames) > 8 {
+		t.Fatalf("expected at most 8 frames, got %d", len(frames))
+	}
+	if !strings.Contains(frames[0].Function, "TestWrapIfDepthCapturesWhenAbsent") {
+		t.Fatalf("top frame should be test caller, got %s", frames[0].Function)
+	}
+}
+
+func TestWrapIfPreservesClassifications(t *testing.T) {
+	var ErrNotFound = errx.NewSentinel("not found")
+	baseErr := errors.New("base")
+	inner := stacktrace.Wrap("inner", baseErr)
+	err := stacktrace.WrapIf("outer", inner, ErrNotFound)
+
+	if !errors.Is(err, ErrNotFound) {
+		t.Error("expected ErrNotFound classification to survive WrapIf")
+	}
+}
+
+func TestHereIfDepthNoopWhenPresent(t *testing.T) {
+	baseErr := errors.New("base")
+	traced := stacktrace.Wrap("inner", baseErr)
+	err := errx.Wrap("outer", traced, stacktrace.HereIfDepth(traced, 4))
+
+	if len(stacktrace.ExtractAll(err)) != 1 {
+		t.Fatalf("expected exactly one trace, got %d", len(stacktrace.ExtractAll(err)))
+	}
+}
+
+func TestClassifyIfCapturesWhenAbsent(t *testing.T) {
+	var ErrRetryable = errx.NewSentinel("retryable")
+	baseErr := errors.New("timeout")
+	err := stacktrace.ClassifyIf(baseErr, ErrRetryable)
+
+	if !errors.Is(err, ErrRetryable) {
+		t.Fatal("expected classification")
+	}
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Fatal("expected stack trace when cause had none")
+	}
+	if !strings.Contains(frames[0].Function, "TestClassifyIfCapturesWhenAbsent") {
+		t.Fatalf("top frame should be test caller, got %s", frames[0].Function)
+	}
+}
+
+func TestClassifyIfSkipsWhenPresent(t *testing.T) {
+	baseErr := errors.New("base")
+	inner := stacktrace.Classify(baseErr)
+	err := stacktrace.ClassifyIf(inner, errx.NewSentinel("retryable"))
+
+	if len(stacktrace.ExtractAll(err)) != 1 {
+		t.Fatalf("expected exactly one trace, got %d", len(stacktrace.ExtractAll(err)))
+	}
+}
+
+func TestWrapIfAddsSecondTraceWithPlainWrap(t *testing.T) {
+	baseErr := errors.New("base")
+	err := stacktrace.WrapIf("first", baseErr)
+	err = stacktrace.Wrap("second", err)
+
+	if len(stacktrace.ExtractAll(err)) != 2 {
+		t.Fatalf("plain Wrap after WrapIf should add a second trace, got %d", len(stacktrace.ExtractAll(err)))
+	}
+}
+
+func TestHasTrace(t *testing.T) {
+	if stacktrace.HasTrace(nil) {
+		t.Fatal("nil should not have trace")
+	}
+	if stacktrace.HasTrace(errors.New("plain")) {
+		t.Fatal("plain error should not have trace")
+	}
+
+	traced := stacktrace.Wrap("ctx", errors.New("base"))
+	if !stacktrace.HasTrace(traced) {
+		t.Fatal("wrapped error should have trace")
+	}
+
+	external := &fakeTracer{
+		msg: "external",
+		frames: []stacktrace.Frame{
+			{File: "ext.go", Line: 1, Function: "ext.fn"},
+		},
+	}
+	if !stacktrace.HasTrace(external) {
+		t.Fatal("external Tracer should count as having trace")
+	}
+
+	emptyTracer := &fakeTracer{msg: "empty", frames: nil}
+	if stacktrace.HasTrace(emptyTracer) {
+		t.Fatal("Tracer with no frames should not count as having trace")
+	}
+}
+
+func TestClassifyIfNil(t *testing.T) {
+	if err := stacktrace.ClassifyIf(nil); err != nil {
+		t.Errorf("expected nil for nil cause, got %v", err)
+	}
+}
+
+func TestHereIfDepthCapturesWhenAbsent(t *testing.T) {
+	baseErr := errors.New("base")
+	err := errx.Wrap("ctx", baseErr, stacktrace.HereIfDepth(baseErr, 8))
+
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Fatal("expected stack trace when cause had none")
+	}
+	if len(frames) > 8 {
+		t.Fatalf("expected at most 8 frames, got %d", len(frames))
+	}
+}
+
+func TestClassifyIfDepthCapturesWhenAbsent(t *testing.T) {
+	var ErrRetryable = errx.NewSentinel("retryable")
+	baseErr := errors.New("timeout")
+	err := stacktrace.ClassifyIfDepth(baseErr, 8, ErrRetryable)
+
+	if !errors.Is(err, ErrRetryable) {
+		t.Fatal("expected classification")
+	}
+	frames := stacktrace.Extract(err)
+	if frames == nil {
+		t.Fatal("expected stack trace when cause had none")
+	}
+	if len(frames) > 8 {
+		t.Fatalf("expected at most 8 frames, got %d", len(frames))
+	}
+	if !strings.Contains(frames[0].Function, "TestClassifyIfDepthCapturesWhenAbsent") {
+		t.Fatalf("top frame should be test caller, got %s", frames[0].Function)
+	}
+}
+
+func TestClassifyIfDepthSkipsWhenPresent(t *testing.T) {
+	baseErr := errors.New("base")
+	inner := stacktrace.Classify(baseErr)
+	err := stacktrace.ClassifyIfDepth(inner, 4, errx.NewSentinel("retryable"))
+
+	if len(stacktrace.ExtractAll(err)) != 1 {
+		t.Fatalf("expected exactly one trace, got %d", len(stacktrace.ExtractAll(err)))
+	}
+}
+
+func TestHasTrace_MultiErrorJoin(t *testing.T) {
+	plain := errors.New("plain branch")
+	traced := stacktrace.Wrap("traced branch", errors.New("inner"))
+	joined := errors.Join(plain, traced)
+
+	if !stacktrace.HasTrace(joined) {
+		t.Fatal("expected HasTrace to find trace inside errors.Join branch")
+	}
+
+	custom := &customTracer{
+		frames: []stacktrace.Frame{
+			{File: "remote.go", Line: 1, Function: "remote.Handler"},
+		},
+	}
+	if !stacktrace.HasTrace(errors.Join(errors.New("a"), custom)) {
+		t.Fatal("expected HasTrace to find external Tracer inside errors.Join")
+	}
+
+	if stacktrace.HasTrace(errors.Join(errors.New("a"), errors.New("b"))) {
+		t.Fatal("expected HasTrace false when join has no traced branches")
+	}
+}
+
 // TestClassify verifies that stacktrace.Classify automatically captures traces
 func TestClassify(t *testing.T) {
 	var ErrDatabase = errx.NewSentinel("database error")

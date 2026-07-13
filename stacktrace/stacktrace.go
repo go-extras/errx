@@ -9,6 +9,14 @@
 //  2. Convenience functions that automatically capture traces:
 //     err := stacktrace.Wrap("context", cause, ErrNotFound)
 //
+//  3. Conditional capture when a trace may already be present (no duplicate
+//     traces through layered Wrap/Classify):
+//     err := stacktrace.WrapIf("context", cause, ErrNotFound)
+//     err := stacktrace.ClassifyIf(cause, ErrRetryable)
+//     err := errx.Wrap("context", cause, ErrNotFound, stacktrace.HereIf(cause))
+//
+// Use HasTrace to branch without extracting frames.
+//
 // Stack traces can be extracted from any error in the chain using Extract():
 //
 //	frames := stacktrace.Extract(err)
@@ -160,6 +168,67 @@ func (*traced) IsClassified() bool {
 	return true
 }
 
+// noTrace is a Classified marker returned by HereIf when cause already carries
+// a stack trace. It is inert: Extract ignores it and fmt.Formatter has nothing
+// to render.
+type noTrace struct{}
+
+func (noTrace) Error() string      { return "" }
+func (noTrace) IsClassified() bool { return true }
+
+var noopTrace errx.Classified = noTrace{}
+
+// HasTrace reports whether err, or any error reachable through its unwrap
+// chain, carrier classifications, or multi-error branches, carries a non-empty
+// stack trace (an internal *traced value or a third-party Tracer).
+func HasTrace(err error) bool {
+	return hasTrace(err)
+}
+
+func hasTrace(err error) bool {
+	if err == nil {
+		return false
+	}
+	w := &traceWalker{
+		seenTraced:   make(map[*traced]struct{}),
+		seenErr:      make(map[uintptr]struct{}),
+		presenceOnly: true,
+	}
+	w.walk(err)
+	return w.found
+}
+
+func captureTraceUnlessPresent(cause error, depth int) (*traced, bool) {
+	if hasTrace(cause) {
+		return nil, false
+	}
+	// skip=4: captureStack, captureTraceUnlessPresent, wrapIfDepth/classifyIfDepth,
+	// and the exported WrapIf*/ClassifyIf* entry point — same effective caller as Wrap().
+	return captureStack(4, depth), true
+}
+
+// HereIf is like Here but returns a no-op classification when cause already
+// carries a stack trace, so layered wrapping does not capture duplicate traces.
+//
+// Example:
+//
+//	err := errx.Wrap("operation failed", cause, ErrNotFound, stacktrace.HereIf(cause))
+func HereIf(cause error) errx.Classified {
+	if hasTrace(cause) {
+		return noopTrace
+	}
+	return captureStack(2, DefaultMaxDepth)
+}
+
+// HereIfDepth is like HereIf but allows the caller to specify the maximum
+// number of stack frames to capture when a new trace is needed.
+func HereIfDepth(cause error, depth int) errx.Classified {
+	if hasTrace(cause) {
+		return noopTrace
+	}
+	return captureStack(2, depth)
+}
+
 // Here captures the current stack trace and returns it as an errx.Classified.
 // It can be used with errx.Wrap() or errx.Classify() to attach stack traces to errors.
 //
@@ -289,21 +358,33 @@ func ExtractAll(err error) [][]Frame {
 }
 
 // traceWalker accumulates traces while walking an error chain, deduplicating
-// repeated errors and *traced instances reachable through multiple paths.
+// repeated errors and *traced instances reachable through multiple paths. When
+// presenceOnly is set, the walk stops as soon as a non-empty trace is found.
 type traceWalker struct {
-	traces     [][]Frame
-	seenTraced map[*traced]struct{}
-	seenErr    map[uintptr]struct{}
+	traces       [][]Frame
+	seenTraced   map[*traced]struct{}
+	seenErr      map[uintptr]struct{}
+	presenceOnly bool
+	found        bool
 }
 
 // walk traverses the error chain rooted at err.
 func (w *traceWalker) walk(err error) {
 	for current := err; current != nil; current = errors.Unwrap(current) {
+		if w.presenceOnly && w.found {
+			return
+		}
 		if !w.markSeen(current) {
 			return
 		}
 		w.collectFrom(current)
+		if w.presenceOnly && w.found {
+			return
+		}
 		w.walkClassifications(current)
+		if w.presenceOnly && w.found {
+			return
+		}
 		if w.walkMultiError(current) {
 			return
 		}
@@ -332,13 +413,25 @@ func (w *traceWalker) collectFrom(err error) {
 			return
 		}
 		w.seenTraced[v] = struct{}{}
-		if f := v.frames(); f != nil {
-			w.traces = append(w.traces, f)
+		f := v.frames()
+		if len(f) == 0 {
+			return
 		}
+		if w.presenceOnly {
+			w.found = true
+			return
+		}
+		w.traces = append(w.traces, f)
 	case Tracer:
-		if f := v.Frames(); f != nil {
-			w.traces = append(w.traces, f)
+		f := v.Frames()
+		if len(f) == 0 {
+			return
 		}
+		if w.presenceOnly {
+			w.found = true
+			return
+		}
+		w.traces = append(w.traces, f)
 	}
 }
 
@@ -375,6 +468,56 @@ func (w *traceWalker) walkMultiError(err error) bool {
 func extractCarrierClassifications(err error) []errx.Classified {
 	cls, _ := errx.CarrierClassifications(err)
 	return cls
+}
+
+// WrapIf is like Wrap but captures a stack trace only when cause does not
+// already carry one.
+//
+// Example:
+//
+//	err := stacktrace.WrapIf("failed to process order", cause, ErrNotFound)
+func WrapIf(text string, cause error, classifications ...errx.Classified) error {
+	return wrapIfDepth(text, cause, DefaultMaxDepth, classifications...)
+}
+
+// WrapIfDepth is like WrapIf but allows the caller to specify the maximum
+// number of stack frames to capture when a new trace is needed.
+func WrapIfDepth(text string, cause error, depth int, classifications ...errx.Classified) error {
+	return wrapIfDepth(text, cause, depth, classifications...)
+}
+
+func wrapIfDepth(text string, cause error, depth int, classifications ...errx.Classified) error {
+	if cause == nil {
+		return nil
+	}
+	trace, attach := captureTraceUnlessPresent(cause, depth)
+	if !attach {
+		return errx.Wrap(text, cause, classifications...)
+	}
+	return errx.Wrap(text, cause, appendTrace(classifications, trace)...)
+}
+
+// ClassifyIf is like Classify but captures a stack trace only when cause does
+// not already carry one.
+func ClassifyIf(cause error, classifications ...errx.Classified) error {
+	return classifyIfDepth(cause, DefaultMaxDepth, classifications...)
+}
+
+// ClassifyIfDepth is like ClassifyIf but allows the caller to specify the
+// maximum number of stack frames to capture when a new trace is needed.
+func ClassifyIfDepth(cause error, depth int, classifications ...errx.Classified) error {
+	return classifyIfDepth(cause, depth, classifications...)
+}
+
+func classifyIfDepth(cause error, depth int, classifications ...errx.Classified) error {
+	if cause == nil {
+		return nil
+	}
+	trace, attach := captureTraceUnlessPresent(cause, depth)
+	if !attach {
+		return errx.Classify(cause, classifications...)
+	}
+	return errx.Classify(cause, appendTrace(classifications, trace)...)
 }
 
 // Wrap wraps an error with additional context text and optional classifications,

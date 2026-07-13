@@ -202,6 +202,37 @@ func Example_integration() {
 	// Has stack trace: true
 }
 
+// ExampleWrapIf demonstrates conditional stack capture through layered wraps.
+func ExampleWrapIf() {
+	baseErr := errors.New("connection timeout")
+
+	// First layer captures the stack.
+	err := stacktrace.WrapIf("query failed", baseErr)
+
+	// Second layer adds context only; the original trace is preserved.
+	err = stacktrace.WrapIf("get user failed", err)
+
+	fmt.Println("message:", err.Error())
+	fmt.Println("trace count:", len(stacktrace.ExtractAll(err)))
+
+	// Output:
+	// message: get user failed: query failed: connection timeout
+	// trace count: 1
+}
+
+// ExampleHereIf demonstrates attaching a trace only when cause lacks one.
+func ExampleHereIf() {
+	var ErrDatabase = errx.NewSentinel("database error")
+
+	alreadyTraced := stacktrace.Wrap("inner", errors.New("timeout"))
+	err := errx.Wrap("outer", alreadyTraced, ErrDatabase, stacktrace.HereIf(alreadyTraced))
+
+	fmt.Println("trace count:", len(stacktrace.ExtractAll(err)))
+
+	// Output:
+	// trace count: 1
+}
+
 // ExampleWrap_format demonstrates that an error carrying a stack trace renders
 // the captured frames under the "%+v" verb, mirroring the github.com/pkg/errors
 // idiom. "%v" and "%s" keep printing the message only.
