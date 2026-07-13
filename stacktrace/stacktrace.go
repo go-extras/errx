@@ -202,7 +202,9 @@ func captureTraceUnlessPresent(cause error, depth int) (*traced, bool) {
 	if hasTrace(cause) {
 		return nil, false
 	}
-	return captureStack(2, depth), true
+	// skip=4: captureStack, captureTraceUnlessPresent, wrapIfDepth/classifyIfDepth,
+	// and the exported WrapIf*/ClassifyIf* entry point — same effective caller as Wrap().
+	return captureStack(4, depth), true
 }
 
 // HereIf is like Here but returns a no-op classification when cause already

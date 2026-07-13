@@ -203,6 +203,9 @@ func TestWrapIfDepthCapturesWhenAbsent(t *testing.T) {
 	if len(frames) > 8 {
 		t.Fatalf("expected at most 8 frames, got %d", len(frames))
 	}
+	if !strings.Contains(frames[0].Function, "TestWrapIfDepthCapturesWhenAbsent") {
+		t.Fatalf("top frame should be test caller, got %s", frames[0].Function)
+	}
 }
 
 func TestWrapIfPreservesClassifications(t *testing.T) {
@@ -234,8 +237,12 @@ func TestClassifyIfCapturesWhenAbsent(t *testing.T) {
 	if !errors.Is(err, ErrRetryable) {
 		t.Fatal("expected classification")
 	}
-	if stacktrace.Extract(err) == nil {
+	frames := stacktrace.Extract(err)
+	if frames == nil {
 		t.Fatal("expected stack trace when cause had none")
+	}
+	if !strings.Contains(frames[0].Function, "TestClassifyIfCapturesWhenAbsent") {
+		t.Fatalf("top frame should be test caller, got %s", frames[0].Function)
 	}
 }
 
@@ -321,6 +328,9 @@ func TestClassifyIfDepthCapturesWhenAbsent(t *testing.T) {
 	}
 	if len(frames) > 8 {
 		t.Fatalf("expected at most 8 frames, got %d", len(frames))
+	}
+	if !strings.Contains(frames[0].Function, "TestClassifyIfDepthCapturesWhenAbsent") {
+		t.Fatalf("top frame should be test caller, got %s", frames[0].Function)
 	}
 }
 
