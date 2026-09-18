@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Conditional stack capture in `stacktrace`** ([#40]) — new helpers capture a stack trace only when the cause chain does not already carry one, mirroring `emperror.dev/errors`'s `WrapIf`/`WithStackIf` pattern without pulling traces into the zero-dependency core:
-  - `HereIf` / `HereIfDepth` — return a no-op `Classified` when `HasTrace(cause)` is true, otherwise behave like `Here`/`HereDepth`.
+  - `HereIf` / `HereIfDepth` — return nil when `HasTrace(cause)` is true, otherwise behave like `Here`/`HereDepth`. The nil result is meant to be passed to `Wrap`/`Classify`, which drop nil classifications.
   - `WrapIf` / `WrapIfDepth` and `ClassifyIf` / `ClassifyIfDepth` — wrap or classify without duplicating an existing trace.
   - `HasTrace(err) bool` — early-exit presence check across unwrap chains, carrier classifications, multi-error branches, and external `Tracer` implementations (empty frame lists do not count).
 
@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `WithStackTraceTrimTop(n int)` — drop the top `n` (innermost) frames, removing framework/runtime noise that sits above the meaningful application frames. `n >= len(frames)` omits the trace entirely; `n <= 0` (the default) keeps all frames.
   - `WithStackFrameFilter(func(stacktrace.Frame) bool)` — a keep-predicate: frames for which it returns `true` are retained, the rest dropped (e.g. strip `runtime.`/`net/http.` frames). A nil filter (the default) keeps all frames.
   - Frames are processed in a fixed order — trim top, then filter, then the `WithMaxStackFrames` cap, then `WithStackTraceTrimPaths` — so the cap counts only the frames that survive trimming. If trimming/filtering removes every frame, the `stack_trace` field is omitted. No existing option's behavior changes.
+
+### Fixed
+
+- **`HereIf`/`HereIfDepth` no longer leak an empty JSON sentinel** ([#55]) — when the cause already carried a stack trace these helpers used to return an inert `noTrace{}` `Classified`. `Wrap`/`Classify` still attached that value, so `json.Marshal` emitted `"sentinels":[""]` and `Classify(cause, HereIf(cause))` allocated a new carrier instead of returning `cause`. They now return nil (dropped since [#15]), the `noTrace` type is gone, and `Classify` is identity when the only classification would have been the no-op.
 
 ### Changed
 
@@ -143,6 +147,7 @@ This release lands a large set of improvements across the core package and every
 [#40]: https://github.com/go-extras/errx/issues/40
 [#43]: https://github.com/go-extras/errx/issues/43
 [#45]: https://github.com/go-extras/errx/issues/45
+[#55]: https://github.com/go-extras/errx/issues/55
 
 ## [1.2.1] - 2026-01-31
 

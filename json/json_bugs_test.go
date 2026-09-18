@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-extras/errx"
 	errxjson "github.com/go-extras/errx/json"
+	"github.com/go-extras/errx/stacktrace"
 )
 
 // Bug #1: errx.Classify duplicates the cause message at every nesting level.
@@ -246,6 +247,21 @@ type customMarshaler struct{ n int }
 
 func (c customMarshaler) MarshalJSON() ([]byte, error) {
 	return []byte(`{"custom":` + itoa(c.n) + `}`), nil
+}
+
+// Bug #55: HereIf used to return an empty-text Classified when a trace was
+// already present, so Marshal emitted "sentinels":[""].
+func TestMarshal_HereIfNoEmptySentinel(t *testing.T) {
+	cause := stacktrace.Wrap("query failed", errors.New("connection reset"))
+	err := errx.Wrap("load user", cause, stacktrace.HereIf(cause))
+
+	data, marshalErr := errxjson.Marshal(err, errxjson.WithStackTrace(false))
+	if marshalErr != nil {
+		t.Fatalf("Marshal error: %v", marshalErr)
+	}
+	if strings.Contains(string(data), `"sentinels"`) {
+		t.Fatalf("expected no sentinels field, got %s", data)
+	}
 }
 
 func itoa(n int) string {

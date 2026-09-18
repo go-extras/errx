@@ -149,6 +149,43 @@ func TestHereIfNoopWhenPresent(t *testing.T) {
 	}
 }
 
+func TestHereIfNilWhenPresent(t *testing.T) {
+	baseErr := errors.New("base")
+	traced := stacktrace.Wrap("inner", baseErr)
+	if stacktrace.HereIf(traced) != nil {
+		t.Fatal("expected HereIf to return nil when cause already has a trace")
+	}
+	if stacktrace.HereIfDepth(traced, 4) != nil {
+		t.Fatal("expected HereIfDepth to return nil when cause already has a trace")
+	}
+}
+
+func TestHereIfClassifyIsIdentityWhenPresent(t *testing.T) {
+	cause := stacktrace.Wrap("query failed", errors.New("connection reset"))
+	got := errx.Classify(cause, stacktrace.HereIf(cause))
+	if got != cause {
+		t.Fatalf("Classify(cause, HereIf(cause)) allocated a carrier; want identity")
+	}
+}
+
+func TestHereIfWrapKeepsMessageAndTrace(t *testing.T) {
+	cause := stacktrace.Wrap("query failed", errors.New("connection reset"))
+	wantFrames := stacktrace.Extract(cause)
+	err := errx.Wrap("load user", cause, stacktrace.HereIf(cause))
+	if err.Error() != "load user: query failed: connection reset" {
+		t.Fatalf("message = %q", err.Error())
+	}
+	got := stacktrace.Extract(err)
+	if len(got) != len(wantFrames) {
+		t.Fatalf("Extract frames = %d, want %d", len(got), len(wantFrames))
+	}
+	for i := range wantFrames {
+		if got[i] != wantFrames[i] {
+			t.Fatalf("frame %d = %+v, want %+v", i, got[i], wantFrames[i])
+		}
+	}
+}
+
 func TestWrapIfCapturesWhenAbsent(t *testing.T) {
 	baseErr := errors.New("base")
 	err := stacktrace.WrapIf("operation failed", baseErr)
