@@ -541,9 +541,29 @@ func addPureSentinels(classifications []errx.Classified, sentinels *[]string, se
 	}
 }
 
-// isPureSentinel checks if a classified error is a pure sentinel.
+// attrLister is implemented by *attributed. Kind-based checks must use this
+// rather than HasAttrs: empty attribute sets (Attrs() / FromAttrMap(nil))
+// report HasAttrs=false since #15, but they are still attributed values and
+// must not be serialized as the "(empty attribute list)" sentinel.
+type attrLister interface {
+	Attrs() []errx.Attr
+}
+
+// isPureSentinel reports whether cls is a classification-only sentinel.
+// Decision is by kind, not content: displayable messages, attributed values
+// (even empty), and stack traces are excluded even when they currently
+// carry no payload.
 func isPureSentinel(cls errx.Classified) bool {
-	return !errx.IsDisplayable(cls) && !errx.HasAttrs(cls) && stacktrace.Extract(cls) == nil
+	if errx.IsDisplayable(cls) {
+		return false
+	}
+	if _, ok := cls.(attrLister); ok {
+		return false
+	}
+	if _, ok := cls.(stacktrace.Tracer); ok {
+		return false
+	}
+	return true
 }
 
 // addSelfAsPureSentinel checks if the error itself is a pure sentinel and adds it.

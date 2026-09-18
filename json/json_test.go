@@ -519,6 +519,56 @@ func TestMarshal_EmptyAttributes(t *testing.T) {
 	if len(result.Attributes) != 0 {
 		t.Errorf("len(Attributes) = %d, want 0", len(result.Attributes))
 	}
+	// Empty attributed values must not be serialized as a sentinel (#57).
+	for _, s := range result.Sentinels {
+		if s == "(empty attribute list)" {
+			t.Errorf("Sentinels = %v, must not include empty attribute list", result.Sentinels)
+		}
+	}
+}
+
+func TestMarshal_EmptyAttrsNotSentinel(t *testing.T) {
+	data, err := errxjson.Marshal(errx.Classify(errors.New("x"), errx.Attrs()))
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if result.Message != "x" {
+		t.Errorf("Message = %q, want %q", result.Message, "x")
+	}
+	for _, s := range result.Sentinels {
+		if s == "(empty attribute list)" {
+			t.Errorf("Sentinels = %v, empty Attrs() must not appear as a sentinel", result.Sentinels)
+		}
+	}
+	if len(result.Attributes) != 0 {
+		t.Errorf("len(Attributes) = %d, want 0", len(result.Attributes))
+	}
+}
+
+func TestMarshal_FromAttrMapNilNotSentinel(t *testing.T) {
+	data, err := errxjson.Marshal(errx.Classify(errors.New("x"), errx.FromAttrMap(nil)))
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if result.Message != "x" {
+		t.Errorf("Message = %q, want %q", result.Message, "x")
+	}
+	for _, s := range result.Sentinels {
+		if s == "(empty attribute list)" {
+			t.Errorf("Sentinels = %v, FromAttrMap(nil) must not appear as a sentinel", result.Sentinels)
+		}
+	}
+	if len(result.Attributes) != 0 {
+		t.Errorf("len(Attributes) = %d, want 0", len(result.Attributes))
+	}
 }
 
 // unhashableError is an error type that contains unhashable fields (map).
