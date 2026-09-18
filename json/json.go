@@ -191,14 +191,14 @@ func ToSerializedError(err error, opts ...Option) *SerializedError {
 //
 // The set is allocated lazily on first use through enterVisited so that
 // single-node errors never pay for the map allocation.
-type visitedSet map[uintptr]bool
+type visitedSet map[errptr.ID]bool
 
 // enterVisited records ptr in the visited set, allocating it lazily on first
 // use. It returns true if ptr was already present (a cycle on the current
 // path). A zero ptr is treated as "not trackable" — neither recorded nor
 // flagged as a cycle.
-func enterVisited(visited *visitedSet, ptr uintptr) bool {
-	if ptr == 0 {
+func enterVisited(visited *visitedSet, ptr errptr.ID) bool {
+	if ptr.IsZero() {
 		return false
 	}
 	if *visited == nil {
@@ -214,8 +214,8 @@ func enterVisited(visited *visitedSet, ptr uintptr) bool {
 
 // exitVisited removes ptr from the visited set so siblings of a DAG branch
 // do not poison each other. Safe to call with a zero ptr or a nil set.
-func exitVisited(visited *visitedSet, ptr uintptr) {
-	if ptr == 0 || *visited == nil {
+func exitVisited(visited *visitedSet, ptr errptr.ID) {
+	if ptr.IsZero() || *visited == nil {
 		return
 	}
 	delete(*visited, ptr)

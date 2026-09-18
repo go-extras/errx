@@ -37,8 +37,8 @@ func (e *unhashableError) Error() string {
 
 func TestGet_Nil(t *testing.T) {
 	ptr := errptr.Get(nil)
-	if ptr != 0 {
-		t.Errorf("Get(nil) = %v, want 0", ptr)
+	if !ptr.IsZero() {
+		t.Errorf("Get(nil) = %+v, want zero", ptr)
 	}
 }
 
@@ -63,8 +63,8 @@ func TestGet_TypedNil(t *testing.T) {
 	}
 
 	ptr := errptr.Get(e)
-	if ptr != 0 {
-		t.Errorf("Get(typed-nil) = %v, want 0", ptr)
+	if !ptr.IsZero() {
+		t.Errorf("Get(typed-nil) = %+v, want zero", ptr)
 	}
 }
 
@@ -80,8 +80,8 @@ func TestGet_TypedNil_DAGCollision(t *testing.T) {
 	ptr1 := errptr.Get(e1)
 	ptr2 := errptr.Get(e2)
 
-	if ptr1 != 0 || ptr2 != 0 {
-		t.Errorf("typed-nil pointers should return 0, got ptr1=%v ptr2=%v", ptr1, ptr2)
+	if !ptr1.IsZero() || !ptr2.IsZero() {
+		t.Errorf("typed-nil pointers should return zero, got ptr1=%+v ptr2=%+v", ptr1, ptr2)
 	}
 }
 
@@ -96,8 +96,8 @@ func TestGet_PointerError_SameInstance(t *testing.T) {
 	if ptr1 != ptr2 {
 		t.Errorf("Same instance should have same pointer: %v != %v", ptr1, ptr2)
 	}
-	if ptr1 == 0 {
-		t.Error("Pointer should not be 0 for non-nil error")
+	if ptr1.IsZero() {
+		t.Error("ID should not be zero for non-nil error")
 	}
 }
 
@@ -125,8 +125,8 @@ func TestGet_ValueError_SameVariable(t *testing.T) {
 
 	// These will be different because each assignment to interface creates a new copy
 	// This is expected behavior - we're testing pointer identity, not value equality
-	if ptr1 == 0 || ptr2 == 0 {
-		t.Error("Pointers should not be 0 for non-nil errors")
+	if ptr1.IsZero() || ptr2.IsZero() {
+		t.Error("IDs should not be zero for non-nil errors")
 	}
 }
 
@@ -138,13 +138,13 @@ func TestGet_ValueError_DifferentValues(t *testing.T) {
 	ptr1 := errptr.Get(e1)
 	ptr2 := errptr.Get(e2)
 
-	if ptr1 == 0 || ptr2 == 0 {
-		t.Error("Pointers should not be 0 for non-nil errors")
+	if ptr1.IsZero() || ptr2.IsZero() {
+		t.Error("IDs should not be zero for non-nil errors")
 	}
 
-	// Different values should have different pointers
+	// Different values should have different identities
 	if ptr1 == ptr2 {
-		t.Errorf("Different value errors should have different pointers, got ptr1=%v ptr2=%v", ptr1, ptr2)
+		t.Errorf("Different value errors should have different IDs, got ptr1=%+v ptr2=%+v", ptr1, ptr2)
 	}
 }
 
@@ -156,8 +156,8 @@ func TestGet_UnhashableError(t *testing.T) {
 	}
 
 	ptr := errptr.Get(err)
-	if ptr == 0 {
-		t.Error("Pointer should not be 0 for non-nil error")
+	if ptr.IsZero() {
+		t.Error("ID should not be zero for non-nil error")
 	}
 }
 
@@ -165,8 +165,8 @@ func TestGet_StandardError(t *testing.T) {
 	err := errors.New("standard error")
 	ptr := errptr.Get(err)
 
-	if ptr == 0 {
-		t.Error("Pointer should not be 0 for non-nil error")
+	if ptr.IsZero() {
+		t.Error("ID should not be zero for non-nil error")
 	}
 }
 
@@ -191,6 +191,53 @@ func TestGet_WrappedError(t *testing.T) {
 	ptrOuter := errptr.Get(outer)
 
 	if ptrInner == ptrOuter {
-		t.Error("Different errors should have different pointers")
+		t.Error("Different errors should have different identities")
+	}
+}
+
+// firstFieldInner is stored as the first field of firstFieldOuter, so
+// &outer.in == &outer. Cycle detection that keys only on the data word
+// treats them as the same error (#56).
+type firstFieldInner struct{ msg string }
+
+func (i *firstFieldInner) Error() string { return i.msg }
+
+type firstFieldOuter struct {
+	in  firstFieldInner
+	ctx string
+}
+
+func (o *firstFieldOuter) Error() string { return o.ctx + ": " + o.in.Error() }
+func (o *firstFieldOuter) Unwrap() error { return &o.in }
+
+func TestGet_FirstFieldUnwrapDistinctTypes(t *testing.T) {
+	err := &firstFieldOuter{in: firstFieldInner{msg: "boom"}, ctx: "op"}
+	outerID := errptr.Get(err)
+	innerID := errptr.Get(err.Unwrap())
+	if outerID.IsZero() || innerID.IsZero() {
+		t.Fatalf("expected non-zero IDs, got outer=%+v inner=%+v", outerID, innerID)
+	}
+	if outerID == innerID {
+		t.Fatalf("wrapper and first-field cause must not share identity: %+v", outerID)
+	}
+}
+
+type zsizeA struct{}
+
+func (zsizeA) Error() string { return "a" }
+
+type zsizeB struct{}
+
+func (zsizeB) Error() string { return "b" }
+
+func TestGet_ZeroSizeDistinctTypes(t *testing.T) {
+	var a error = zsizeA{}
+	var b error = zsizeB{}
+	ida, idb := errptr.Get(a), errptr.Get(b)
+	if ida.IsZero() || idb.IsZero() {
+		t.Fatalf("expected non-zero IDs, got a=%+v b=%+v", ida, idb)
+	}
+	if ida == idb {
+		t.Fatal("different zero-size types must not share identity")
 	}
 }

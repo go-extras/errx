@@ -1023,3 +1023,32 @@ func TestError_DoesNotResolveFrames(t *testing.T) {
 		t.Fatal("expected at least one frame after Extract")
 	}
 }
+
+// firstFieldInner is stored as the first field of firstFieldOuter, so
+// &outer.in == &outer. Pre-#56, HasTrace keyed only on the data word
+// and treated the cause as already visited.
+type firstFieldInner struct{ msg string }
+
+func (i *firstFieldInner) Error() string { return i.msg }
+func (*firstFieldInner) Frames() []stacktrace.Frame {
+	return []stacktrace.Frame{{File: "db.go", Line: 42, Function: "db.Query"}}
+}
+
+type firstFieldOuter struct {
+	in  firstFieldInner
+	ctx string
+}
+
+func (o *firstFieldOuter) Error() string { return o.ctx + ": " + o.in.Error() }
+func (o *firstFieldOuter) Unwrap() error { return &o.in }
+
+func TestHasTrace_FirstFieldUnwrap(t *testing.T) {
+	err := &firstFieldOuter{in: firstFieldInner{msg: "boom"}, ctx: "op"}
+	if !stacktrace.HasTrace(err) {
+		t.Fatal("HasTrace = false, want true")
+	}
+	all := stacktrace.ExtractAll(err)
+	if len(all) == 0 || len(all[0]) == 0 {
+		t.Fatalf("ExtractAll dropped the inner Tracer: %+v", all)
+	}
+}

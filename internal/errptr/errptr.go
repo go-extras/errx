@@ -5,24 +5,44 @@ package errptr
 
 import "unsafe"
 
-// Get extracts the data pointer from an error interface.
+// ID uniquely identifies an error interface value for cycle detection.
+// It is the (type, data) pair of the interface header, so two errors that
+// share a data address but have different dynamic types stay distinct.
+// That happens when a wrapper stores its cause as the first field and
+// Unwrap returns &outer.cause (so &outer == &outer.cause), and when two
+// zero-size values of different types both point at the runtime zerobase.
+//
+// A zero ID (IsZero) means the error is not trackable: nil or typed-nil.
+// Callers treat a zero ID as "skip" for visited-set tracking.
+type ID struct {
+	typ  uintptr
+	data uintptr
+}
+
+// IsZero reports whether id is the untrackable sentinel (nil or typed-nil).
+func (id ID) IsZero() bool {
+	return id.data == 0
+}
+
+// Get extracts a comparable identity from an error interface.
 // This works for both pointer-based and value-based errors.
 //
-// For pointer errors, it returns the pointer to the object.
-// For value errors, it returns the pointer to the copy stored in the interface.
+// For pointer errors, the data word is the pointer to the object.
+// For value errors, the data word is the pointer to the copy stored in the interface.
 //
 // This function is safe to call on any error value (including nil).
-// It returns 0 for nil errors.
+// It returns a zero ID for nil and typed-nil errors.
 //
-// The returned pointer uniquely identifies the error instance based on pointer identity,
-// not value equality. This means:
-//   - The same error instance will always return the same pointer
-//   - Different instances with identical content will return different pointers
-//   - For value-based errors, each assignment to an interface creates a new copy with a new pointer
+// The returned ID uniquely identifies the error instance based on the
+// interface header (dynamic type + data pointer), not value equality:
+//   - The same error instance will always return the same ID
+//   - Different instances with identical content will return different IDs
+//   - For value-based errors, each assignment to an interface creates a new copy with a new data pointer
+//   - Two errors of different types at the same address return different IDs
 //
 // # Safety Note on uintptr
 //
-// This function returns uintptr instead of unsafe.Pointer because:
+// The ID fields are uintptr rather than unsafe.Pointer because:
 //  1. The value is used only as a map key for identity comparison during a single operation
 //  2. We never dereference the pointer or convert it back to unsafe.Pointer
 //  3. The actual error values are kept alive by the call stack during traversal
@@ -30,9 +50,9 @@ import "unsafe"
 //
 // While uintptr values are not guaranteed to remain stable across garbage collections
 // in a hypothetical moving GC, this is safe for our use case because:
-//   - The uintptr is only used for comparison within a single function call
+//   - The ID is only used for comparison within a single function call
 //   - The errors being tracked are live on the stack and won't be moved during the operation
-//   - We don't store the uintptr beyond the scope of the error traversal
+//   - We don't store the ID beyond the scope of the error traversal
 //
 // This is a standard pattern in Go for pointer identity tracking (similar to how
 // reflect.Value.Pointer() is used) and is safe under the current and foreseeable
@@ -49,15 +69,17 @@ import "unsafe"
 //	err3 := &MyError{msg: "test"}  // Different instance, same content
 //	ptr3 := errptr.Get(err3)
 //	// ptr1 != ptr3 (different instances)
-func Get(err error) uintptr {
+func Get(err error) ID {
 	if err == nil {
-		return 0
+		return ID{}
 	}
 
 	// An interface in Go is represented as two pointers:
 	// - type pointer (points to type information)
 	// - data pointer (points to the actual data)
-	// We extract the data pointer which uniquely identifies the error instance.
+	// Both words are required: the data pointer alone collides when a
+	// wrapper's first field is the cause (same address, different type)
+	// or when distinct zero-size types share the runtime zerobase.
 	type iface struct {
 		typ  unsafe.Pointer
 		data unsafe.Pointer
@@ -65,11 +87,11 @@ func Get(err error) uintptr {
 	p := (*iface)(unsafe.Pointer(&err))
 	// Typed-nil errors (e.g. `var p *MyErr; var e error = p`) have a non-nil
 	// type pointer but a nil data pointer. They do not have a trackable
-	// identity, so we treat them the same as a nil error (return 0). Callers
-	// already special-case 0 as "skip" for visited-set tracking, which avoids
-	// collisions between multiple typed-nil values in the same error chain.
+	// identity, so we treat them the same as a nil error (zero ID). Callers
+	// already special-case IsZero as "skip" for visited-set tracking, which
+	// avoids collisions between multiple typed-nil values in the same error chain.
 	if p.data == nil {
-		return 0
+		return ID{}
 	}
-	return uintptr(p.data)
+	return ID{typ: uintptr(p.typ), data: uintptr(p.data)}
 }

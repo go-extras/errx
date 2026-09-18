@@ -322,7 +322,7 @@ func HasAttrs(err error) bool {
 		return false
 	}
 
-	visited := make(map[uintptr]bool)
+	visited := make(map[errptr.ID]bool)
 	queue := []error{err}
 
 	for len(queue) > 0 {
@@ -334,7 +334,7 @@ func HasAttrs(err error) bool {
 		}
 
 		ptr := errptr.Get(current)
-		if ptr != 0 {
+		if !ptr.IsZero() {
 			if visited[ptr] {
 				continue
 			}
@@ -381,7 +381,7 @@ func ExtractAttrs(err error) AttrList {
 	}
 
 	var allAttrs []Attr
-	visited := make(map[uintptr]bool)
+	visited := make(map[errptr.ID]bool)
 
 	// Use a queue for breadth-first traversal to handle multi-errors
 	queue := []error{err}

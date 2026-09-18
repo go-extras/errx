@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-extras/errx"
 	errxjson "github.com/go-extras/errx/json"
+	"github.com/go-extras/errx/stacktrace"
 )
 
 // Bug #1: errx.Classify duplicates the cause message at every nesting level.
@@ -269,4 +270,42 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// firstFieldInner is stored as the first field of firstFieldOuter, so
+// &outer.in == &outer. Pre-#56, json cycle detection keyed only on the
+// data word and reported a circular reference instead of the cause.
+type firstFieldInner struct{ msg string }
+
+func (i *firstFieldInner) Error() string { return i.msg }
+func (*firstFieldInner) Frames() []stacktrace.Frame {
+	return []stacktrace.Frame{{File: "db.go", Line: 42, Function: "db.Query"}}
+}
+
+type firstFieldOuter struct {
+	in  firstFieldInner
+	ctx string
+}
+
+func (o *firstFieldOuter) Error() string { return o.ctx + ": " + o.in.Error() }
+func (o *firstFieldOuter) Unwrap() error { return &o.in }
+
+func TestMarshal_FirstFieldUnwrapIsNotCircular(t *testing.T) {
+	err := &firstFieldOuter{in: firstFieldInner{msg: "boom"}, ctx: "op"}
+
+	if !stacktrace.HasTrace(err) {
+		t.Fatal("HasTrace(err) = false, want true (inner Tracer must be visited)")
+	}
+
+	data, marshalErr := errxjson.Marshal(err)
+	if marshalErr != nil {
+		t.Fatalf("Marshal error: %v", marshalErr)
+	}
+	s := string(data)
+	if strings.Contains(s, "circular reference") {
+		t.Fatalf("Marshal reported a false cycle: %s", s)
+	}
+	if !strings.Contains(s, "boom") {
+		t.Fatalf("Marshal dropped the cause: %s", s)
+	}
 }

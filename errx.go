@@ -115,11 +115,11 @@ import (
 // either an untyped-nil interface, or a typed-nil interface (e.g. a
 // `(*sentinel)(nil)` stored in a Classified). The latter case slips past a
 // plain `c != nil` check because the interface still has a non-nil type
-// pointer. We delegate to errptr.Get, which returns 0 for both forms by
-// inspecting the interface header — keeping all unsafe-pointer code in the
-// single internal/errptr package rather than duplicating it here.
+// pointer. We delegate to errptr.Get, which returns a zero ID for both
+// forms by inspecting the interface header — keeping all unsafe-pointer
+// code in the single internal/errptr package rather than duplicating it here.
 func isNilClassified(c Classified) bool {
-	return errptr.Get(c) == 0
+	return errptr.Get(c).IsZero()
 }
 
 // nonNilClassifications returns a slice containing only the non-nil entries
