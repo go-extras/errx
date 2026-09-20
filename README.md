@@ -389,10 +389,13 @@ fmt.Printf("%+v\n", err)
 Traces are **opt-in** so the core package stays dependency-free and fast, and they compose
 with every other feature. Errors that carry a trace implement `fmt.Formatter`: `%+v` prints
 the message followed by the captured frames (de-facto `pkg/errors` style), while `%v` and
-`%s` print the message only. This makes errx a **drop-in target for code migrating off
-`pkg/errors`**, where `log.Printf("%+v", err)` is the standard way to surface stack traces —
-no logging changes required. Errors without a trace (plain `errx.Wrap`/`Classify`) print the
-message only under `%+v`, exactly as before.
+`%s` print the message only. The trace does not have to be attached at the outermost layer:
+wrapping a traced error again with `errx.Wrap`, `errx.Classify` or `errx.Join` keeps it
+reachable, and `%+v` at the top of a request prints the innermost trace it finds. This makes
+errx a **drop-in target for code migrating off `pkg/errors`**, where
+`log.Printf("%+v", err)` is the standard way to surface stack traces — no logging changes
+required. Errors with no trace anywhere in the chain print the message only under `%+v`,
+exactly as before.
 
 See the [stacktrace docs](https://pkg.go.dev/github.com/go-extras/errx/stacktrace).
 

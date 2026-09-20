@@ -115,3 +115,71 @@ func TestWrapFormatPlainVerbs(t *testing.T) {
 		t.Errorf("%%q = %q, want %q", q, `"boom: base failure"`)
 	}
 }
+
+// countFrameLines returns the number of pkg/errors-style frame entries in s.
+// traced.Format writes one "\n\t" per frame, so this also tells how many
+// traces were rendered when compared with the frame count of the chain.
+func countFrameLines(s string) int {
+	return strings.Count(s, "\n\t")
+}
+
+// TestFormatPlusVThroughOuterLayers covers issue #54 with real captured traces:
+// a trace taken deep in the chain has to survive every outer layer, and exactly
+// one trace may be rendered.
+func TestFormatPlusVThroughOuterLayers(t *testing.T) {
+	tag := errx.NewSentinel("tag")
+	base := errors.New("connection reset")
+	inner := stacktrace.Wrap("query failed", base)
+	want := len(stacktrace.Extract(inner))
+	if want == 0 {
+		t.Fatal("expected the inner error to carry a trace")
+	}
+
+	tests := []struct {
+		name    string
+		err     error
+		message string
+	}{
+		{"wrap with a classification", errx.Wrap("load user", inner, tag), "load user: query failed: connection reset"},
+		{"wrap without classifications", errx.Wrap("load user", inner), "load user: query failed: connection reset"},
+		{"classify", errx.Classify(inner, tag), "query failed: connection reset"},
+		{"join", errx.Join(inner, errors.New("other")), "query failed: connection reset\nother"},
+		{"wrapIf over a traced cause", stacktrace.WrapIf("again", inner), "again: query failed: connection reset"},
+		{"nested wraps", errx.Wrap("a", errx.Wrap("b", inner)), "a: b: query failed: connection reset"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out := fmt.Sprintf("%+v", tc.err)
+
+			if !strings.HasPrefix(out, tc.message) {
+				t.Errorf("expected the message %q first, got:\n%s", tc.message, out)
+			}
+			if !strings.Contains(out, "TestFormatPlusVThroughOuterLayers") {
+				t.Errorf("expected the capturing function in the frames, got:\n%s", out)
+			}
+			if got := countFrameLines(out); got != want {
+				t.Errorf("rendered %d frame lines, want %d (exactly one trace)", got, want)
+			}
+			if strings.Count(out, tc.message) != 1 {
+				t.Errorf("expected the message exactly once, got:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestFormatPlusVRendersOutermostTraceOnly pins which trace wins when several
+// layers captured one: the outermost, matching stacktrace.Extract.
+func TestFormatPlusVRendersOutermostTraceOnly(t *testing.T) {
+	inner := stacktrace.Wrap("inner", errors.New("base failure"))
+	outer := errx.Wrap("outer", stacktrace.Classify(inner, errx.NewSentinel("tag")))
+
+	out := fmt.Sprintf("%+v", outer)
+
+	if got, want := countFrameLines(out), len(stacktrace.Extract(outer)); got != want {
+		t.Errorf("rendered %d frame lines, want %d", got, want)
+	}
+	if strings.Count(out, "outer: inner: base failure") != 1 {
+		t.Errorf("expected the message exactly once, got:\n%s", out)
+	}
+}
