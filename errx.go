@@ -275,23 +275,26 @@ func NewSentinel(text string, parents ...Classified) Classified {
 // as well as add displayable errors.
 // If err is nil, Wrap returns nil.
 //
-// If no classifications are provided, Wrap behaves like fmt.Errorf with %w,
-// avoiding unnecessary carrier allocation.
+// If no classifications are provided, the carrier allocation is skipped and the
+// result wraps the cause directly, matching what fmt.Errorf with %w produces:
+// Error is "text: cause" and a single Unwrap yields the cause.
 //
-// When one or more classifications are attached, the returned error implements
-// fmt.Formatter: fmt.Sprintf("%+v", err) prints the message followed by any
-// classification that itself renders under "%+v" (most notably a stack trace
-// captured via the stacktrace subpackage), in the de-facto pkg/errors style.
-// "%v" and "%s" still print the message only. Unwrapping the result once yields
-// the underlying classification carrier, so errors.Is/errors.As and
-// CarrierClassifications behave exactly as before.
+// The returned error implements fmt.Formatter: fmt.Sprintf("%+v", err) prints
+// the message followed by any classification that itself renders under "%+v"
+// (most notably a stack trace captured via the stacktrace subpackage), in the
+// de-facto pkg/errors style. The classification does not have to be attached at
+// this level: outer layers that carry none of their own reach down the chain,
+// so a trace captured deep inside still surfaces at the top. "%v" and "%s"
+// still print the message only. When classifications are attached, unwrapping
+// the result once yields the underlying classification carrier, so errors.Is,
+// errors.As and CarrierClassifications behave exactly as before.
 func Wrap(text string, cause error, classifications ...Classified) error {
 	if cause == nil {
 		return nil
 	}
 	classifications = nonNilClassifications(classifications)
 	if len(classifications) == 0 {
-		return fmt.Errorf("%s: %w", text, cause)
+		return &wrapped{text: text, cause: cause}
 	}
 	// Mirror the (text, carrier) shape that fmt.Errorf("%s: %w", text, carrier)
 	// used to build, but with our own wrapper type so the result can implement
@@ -400,11 +403,13 @@ func (c *carrier) As(target any) bool {
 
 // Format implements fmt.Formatter so that carriers produced by Classify and
 // ClassifyNew take part in pkg/errors-style "%+v" rendering. Under "%+v" the
-// error message is written first, then every classification that is itself a
-// fmt.Formatter is appended — most notably a stack trace captured by the
-// stacktrace subpackage, whose *traced type writes its frames. "%v" and "%s"
-// render the message only (unchanged), "%q" renders the quoted message, and
-// unknown verbs produce a stdlib-style "%!<verb>(errx.carrier=...)" marker.
+// error message is written first, then every classification of this carrier
+// that is itself a fmt.Formatter — most notably a stack trace captured by the
+// stacktrace subpackage, whose *traced type writes its frames. When this
+// carrier has no such classification, the search continues down the chain, so a
+// trace attached below an outer Classify still surfaces. "%v" and "%s" render
+// the message only (unchanged), "%q" renders the quoted message, and unknown
+// verbs produce a stdlib-style "%!<verb>(errx.carrier=...)" marker.
 //
 // Because sentinel text is intentionally hidden from the message chain (see
 // Error), plain sentinels contribute nothing here; only Formatter
@@ -418,7 +423,7 @@ func (c *carrier) Format(s fmt.State, verb rune) {
 	case 'v':
 		if s.Flag('+') {
 			_, _ = io.WriteString(s, c.Error())
-			formatClassifications(s, verb, c.classifications)
+			formatTrailer(s, verb, c)
 			return
 		}
 		fallthrough
@@ -432,35 +437,146 @@ func (c *carrier) Format(s fmt.State, verb rune) {
 }
 
 // formatClassifications writes, for the given verb, the rendering of every
-// classification in cs that implements fmt.Formatter. It is the shared "%+v"
-// tail used by carrier.Format and wrapped.Format: after the message has been
-// written, captured stack traces (the stacktrace subpackage's *traced type is a
-// fmt.Formatter) append their frames here. Classifications that are not
-// Formatters — plain sentinels, displayable, and attributed errors — render
+// classification in cs that implements fmt.Formatter, and reports whether it
+// wrote anything. Captured stack traces (the stacktrace subpackage's *traced
+// type is a fmt.Formatter) append their frames here. Classifications that are
+// not Formatters — plain sentinels, displayable, and attributed errors — render
 // nothing, keeping them invisible in formatted output exactly as they are under
 // "%v" and "%s".
-func formatClassifications(s fmt.State, verb rune, cs []Classified) {
+func formatClassifications(s fmt.State, verb rune, cs []Classified) bool {
+	wrote := false
 	for _, cls := range cs {
 		if f, ok := cls.(fmt.Formatter); ok {
 			f.Format(s, verb)
+			wrote = true
 		}
 	}
+	return wrote
 }
 
-// wrapped is the error returned by Wrap when one or more classifications are
-// attached. It pairs the wrap context text with the carrier that holds the
-// classifications and the underlying cause.
+// Bounds on the "%+v" search below. An error graph built through ordinary
+// wrapping stays far below both, so they only matter for pathological input:
+// the depth cap stops a cycle (the standard library's own Unwrap-based helpers
+// have no such guard), and the node budget stops a wide DAG from being walked
+// through every path. Reaching either limit means the trailer is omitted, never
+// that formatting fails.
+const (
+	formatMaxDepth   = 64
+	formatNodeBudget = 512
+)
+
+// formatTrailer writes the "%+v" tail for err: it walks the chain outermost
+// first and, at the first level whose classifications include a fmt.Formatter,
+// renders every Formatter classification of that level. Levels are the carriers
+// produced by Wrap/Classify/ClassifyNew; a classification that is not itself a
+// Formatter is searched as a chain of its own (so a trace attached as a
+// sentinel's parent is still found), and multi-error branches are searched in
+// argument order.
+//
+// Only classifications are rendered, never the errors of the chain itself:
+// their text is already part of the message written before the trailer, so
+// formatting them again would print it twice. Stopping at the first level that
+// has something to render keeps a chain wrapped at every layer from printing
+// one stack trace per layer; the outermost trace wins, which is what
+// stacktrace.Extract returns as well. stacktrace.ExtractAll returns every trace
+// in the chain for callers that need more than the one this prints.
+func formatTrailer(s fmt.State, verb rune, err error) {
+	w := formatWalker{s: s, verb: verb, budget: formatNodeBudget}
+	w.walk(err, 0, chainWalk)
+}
+
+// walkMode says which chain the trailer search is currently on. On the error's
+// own chain only classifications render, because the errors there carry the
+// message that was already written. Inside a classification there is no such
+// message, so any fmt.Formatter renders — that is how a trace attached as a
+// sentinel's parent is found.
+type walkMode uint8
+
+const (
+	chainWalk walkMode = iota
+	classificationWalk
+)
+
+// formatWalker holds the state of one trailer search: where to write, the verb
+// to render with, and how many more nodes may be visited.
+type formatWalker struct {
+	s      fmt.State
+	verb   rune
+	budget int
+}
+
+// walk searches err for something to render and reports whether it wrote
+// anything.
+func (w *formatWalker) walk(err error, depth int, mode walkMode) bool {
+	for err != nil {
+		if depth > formatMaxDepth || w.budget <= 0 {
+			return false
+		}
+		w.budget--
+
+		if c, ok := err.(*carrier); ok {
+			if w.renderLevel(c, depth) {
+				return true
+			}
+			err, depth = c.cause, depth+1
+			continue
+		}
+
+		if mode == classificationWalk {
+			if f, ok := err.(fmt.Formatter); ok {
+				f.Format(w.s, w.verb)
+				return true
+			}
+		}
+
+		if multi, ok := err.(interface{ Unwrap() []error }); ok {
+			return w.walkBranches(multi.Unwrap(), depth, mode)
+		}
+
+		err, depth = errors.Unwrap(err), depth+1
+	}
+	return false
+}
+
+// renderLevel renders the Formatter classifications attached at c, or, when
+// none of them renders on its own, searches the chain of each classification.
+func (w *formatWalker) renderLevel(c *carrier, depth int) bool {
+	if formatClassifications(w.s, w.verb, c.classifications) {
+		return true
+	}
+	for _, cls := range c.classifications {
+		if w.walk(cls, depth+1, classificationWalk) {
+			return true
+		}
+	}
+	return false
+}
+
+// walkBranches searches the members of a multi-error in argument order.
+func (w *formatWalker) walkBranches(branches []error, depth int, mode walkMode) bool {
+	for _, branch := range branches {
+		if w.walk(branch, depth+1, mode) {
+			return true
+		}
+	}
+	return false
+}
+
+// wrapped is the error returned by Wrap. It pairs the wrap context text with
+// the error below it: the carrier holding the classifications when Wrap was
+// given any, otherwise the cause itself.
 //
 // It exists so the wrap layer can implement fmt.Formatter; the standard library's
 // fmt.wrapError (produced by the fmt.Errorf("%s: %w", …) form Wrap used before)
 // does not, which left "%+v" unable to reach a captured stack trace. Error and
 // Unwrap deliberately match that former wrapper byte-for-byte: Error is
-// "text: cause" and Unwrap exposes the carrier (so a single Unwrap still yields a
-// Classified error and CarrierClassifications reports false for the wrapper
-// itself, both relied upon by callers and the json subpackage).
+// "text: cause" and Unwrap exposes the next level down (the carrier when there
+// is one, so a single Unwrap still yields a Classified error and
+// CarrierClassifications reports false for the wrapper itself, both relied upon
+// by callers and the json subpackage).
 type wrapped struct {
 	text  string
-	cause *carrier
+	cause error
 }
 
 func (w *wrapped) Error() string {
@@ -472,17 +588,17 @@ func (w *wrapped) Unwrap() error {
 }
 
 // Format implements fmt.Formatter for the wrap layer. It mirrors carrier.Format:
-// "%+v" prints the "text: cause" message and then appends the carrier's
-// Formatter classifications (e.g. a captured stack trace); "%v"/"%s" print the
+// "%+v" prints the "text: cause" message and then the Formatter classifications
+// found down the chain (e.g. a captured stack trace); "%v"/"%s" print the
 // message only, "%q" the quoted message, and unknown verbs a stdlib-style
 // marker. The message is written from Error() rather than by delegating to the
-// carrier so the cause text is not duplicated.
+// level below so the cause text is not duplicated.
 func (w *wrapped) Format(s fmt.State, verb rune) {
 	switch verb {
 	case 'v':
 		if s.Flag('+') {
 			_, _ = io.WriteString(s, w.Error())
-			formatClassifications(s, verb, w.cause.classifications)
+			formatTrailer(s, verb, w.cause)
 			return
 		}
 		fallthrough

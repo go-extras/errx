@@ -1,5 +1,10 @@
 package errx
 
+import (
+	"fmt"
+	"io"
+)
+
 // joinError aggregates multiple errors into a single error value. It mirrors
 // the type returned by the standard library's errors.Join: its Error method
 // renders each member on its own line, and its Unwrap method exposes the full
@@ -28,6 +33,31 @@ func (e *joinError) Error() string {
 // attribute/displayable traversal can descend into every branch.
 func (e *joinError) Unwrap() []error {
 	return e.errs
+}
+
+// Format implements fmt.Formatter so an aggregate takes part in the same
+// pkg/errors-style "%+v" rendering as the rest of the package: the joined
+// messages first, then the Formatter classifications of the first branch that
+// has any, most notably a captured stack trace. Members are searched in order,
+// so the trace of the first failing branch is the one that surfaces. "%v" and
+// "%s" render the joined messages only, "%q" renders them quoted, and unknown
+// verbs produce a stdlib-style marker.
+func (e *joinError) Format(s fmt.State, verb rune) {
+	switch verb {
+	case 'v':
+		if s.Flag('+') {
+			_, _ = io.WriteString(s, e.Error())
+			formatTrailer(s, verb, e)
+			return
+		}
+		fallthrough
+	case 's':
+		_, _ = io.WriteString(s, e.Error())
+	case 'q':
+		_, _ = fmt.Fprintf(s, "%q", e.Error())
+	default:
+		_, _ = fmt.Fprintf(s, "%%!%c(errx.joinError=%s)", verb, e.Error())
+	}
 }
 
 // Join combines multiple errors into a single error that reports every non-nil
