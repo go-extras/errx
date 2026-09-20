@@ -44,11 +44,13 @@ jobs:
         run: go mod download
 
       - name: Fuzz
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '2m' }}
         run: >
           go test ${{ matrix.package }}
           -run '^$'
           -fuzz '^${{ matrix.target }}$'
-          -fuzztime ${{ inputs.fuzztime || '2m' }}
+          -fuzztime "$FUZZTIME"
 
       - name: Upload failing inputs
         if: failure()
