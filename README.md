@@ -391,8 +391,10 @@ with every other feature. Errors that carry a trace implement `fmt.Formatter`: `
 the message followed by the captured frames (de-facto `pkg/errors` style), while `%v` and
 `%s` print the message only. The trace does not have to be attached at the outermost layer:
 wrapping a traced error again with `errx.Wrap`, `errx.Classify` or `errx.Join` keeps it
-reachable, and `%+v` at the top of a request prints the innermost trace it finds. This makes
-errx a **drop-in target for code migrating off `pkg/errors`**, where
+reachable, and `%+v` at the top of a request still prints it. When several layers captured a
+trace, the outermost one is printed — the same one `stacktrace.Extract` returns — so the
+output holds one trace, not one per layer. This makes errx a **drop-in target for code
+migrating off `pkg/errors`**, where
 `log.Printf("%+v", err)` is the standard way to surface stack traces — no logging changes
 required. Errors with no trace anywhere in the chain print the message only under `%+v`,
 exactly as before.
