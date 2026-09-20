@@ -34,4 +34,32 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test -v -race ./...
+        run: go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        if: matrix.go-version == 'stable'
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          low=$(go tool cover -func=coverage.out | awk '!/^total:/ && $3+0 < 90')
+          if [ -z "$low" ]; then
+            low="none"
+          fi
+          {
+            echo "### Coverage: $total"
+            echo
+            echo "<details><summary>Functions below 90%</summary>"
+            echo
+            echo '```'
+            echo "$low"
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage profile
+        if: matrix.go-version == 'stable'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: error
