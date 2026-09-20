@@ -1,0 +1,61 @@
+name: Go Fuzz
+
+on:
+  schedule:
+    # Monday, shortly after the weekly Dependabot run.
+    - cron: "30 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Time to spend on each fuzz target
+        default: 2m
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: .
+            target: FuzzAttrs
+          - package: .
+            target: FuzzExtractAttrs_Chain
+          - package: .
+            target: FuzzExtractAttrs_MultiError
+          - package: ./json
+            target: FuzzMarshal
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Fuzz
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '2m' }}
+        run: >
+          go test ${{ matrix.package }}
+          -run '^$'
+          -fuzz '^${{ matrix.target }}$'
+          -fuzztime "$FUZZTIME"
+
+      - name: Upload failing inputs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-failure-${{ matrix.target }}
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: ignore

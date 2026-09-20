@@ -28,10 +28,8 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      # - name: Check go mod tidy
-      #  run: |
-      #    go mod tidy
-      #    git diff --exit-code go.mod go.sum
+      - name: Check go mod tidy
+        run: go mod tidy -diff
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
