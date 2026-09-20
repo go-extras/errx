@@ -37,6 +37,40 @@
 // still produce the underlying error message only. This makes errx a drop-in
 // target for codebases migrating off github.com/pkg/errors, where logging errors
 // with "%+v" is the standard idiom for surfacing stack traces.
+//
+// # Which trace "%+v" prints
+//
+// A chain can hold more than one trace: every Here, Wrap, Classify and
+// ClassifyNew call captures one, and an aggregate built with errx.Join or
+// errors.Join turns the chain into a tree whose branches each carry their own.
+// "%+v" prints one of them: the first found walking from the outermost layer
+// inwards, and through the branches of an aggregate in argument order. The same
+// traversal backs Extract, so the trace that is printed is the one Extract
+// returns.
+//
+// Printing one keeps a chain that captured at every layer from filling the log
+// with a stack per layer. It is a presentation choice; the other traces are
+// still in the error and can be read with ExtractAll.
+//
+// Two consequences are worth knowing when more than one layer captures:
+//
+//   - The innermost capture is usually the more useful one. It is taken further
+//     down the same goroutine stack, so its frames cover those of every later
+//     capture plus the ones below them, while the outermost capture starts
+//     where the error had already travelled some way up. Once the error crosses
+//     a goroutine boundary the traces are unrelated and neither covers the
+//     other.
+//   - The branches of an aggregate fail independently, so the traces of every
+//     branch after the first are not printed at all.
+//
+// If that matters for your logs, the alternatives are:
+//
+//   - ExtractAll returns every trace in the chain, outermost first and branches
+//     in argument order, leaving the rendering policy to the caller.
+//   - The conditional helpers (HereIf, WrapIf, ClassifyIf, and HasTrace to
+//     branch by hand) capture only when the cause carries no trace yet. Wrapping
+//     with them throughout leaves exactly one trace, the earliest and most
+//     complete one, which is then also the one "%+v" prints.
 package stacktrace
 
 import (
@@ -297,7 +331,11 @@ func appendTrace(classifications []errx.Classified, trace *traced) []errx.Classi
 // It traverses the entire error chain (including multi-error branches produced
 // by errors.Join) looking for a traced error or a third-party Tracer
 // implementation and returns its frames. The outermost trace wins, matching
-// pkg/errors semantics.
+// pkg/errors semantics, and it is also the trace that "%+v" renders.
+//
+// When a chain may carry several traces — layers that each captured one, or an
+// aggregate whose branches failed independently — use ExtractAll instead. See
+// the package documentation for why the outermost is rarely the most complete.
 //
 // Returns nil if the error is nil or does not contain any stack trace.
 //
@@ -323,8 +361,15 @@ func Extract(err error) []Frame {
 }
 
 // ExtractAll returns every stack trace found in the error chain, ordered from
-// the outermost wrap (closest to the caller) to the innermost. Both the
-// internal traced type and external Tracer implementations are collected.
+// the outermost wrap (closest to the caller) to the innermost, with the
+// branches of an aggregate traversed in argument order. Both the internal
+// traced type and external Tracer implementations are collected, and a trace
+// reachable through several paths is returned once.
+//
+// This is the way to reach the traces that Extract and "%+v" do not surface:
+// they report the outermost one only, which on a multi-capture chain is the
+// least complete, and on an aggregate says nothing about the branches after the
+// first.
 //
 // Returns nil if the error is nil or contains no traces. The existing Extract
 // behaviour (outermost only) is unchanged.

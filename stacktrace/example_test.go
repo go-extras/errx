@@ -255,3 +255,40 @@ func ExampleWrap_format() {
 	// has stack trace: true
 	// plain %v: dial database: connection refused
 }
+
+// exampleQueryUser and exampleLoadUser each capture a trace, so the resulting
+// chain carries two of them.
+func exampleQueryUser() error {
+	return stacktrace.Wrap("query failed", errors.New("connection reset"))
+}
+
+func exampleLoadUser() error {
+	return stacktrace.Wrap("load user", exampleQueryUser())
+}
+
+// shortFuncName trims the package path from a frame's function name so the
+// example output does not depend on the module path.
+func shortFuncName(name string) string {
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
+// ExampleExtractAll shows how to reach every trace in a chain. "%+v" and
+// Extract report the outermost one only, which on a multi-capture chain is the
+// least complete; ExtractAll hands the caller all of them, outermost first.
+func ExampleExtractAll() {
+	err := errx.Wrap("request failed", exampleLoadUser())
+
+	all := stacktrace.ExtractAll(err)
+	for i, frames := range all {
+		fmt.Printf("trace %d captured in %s\n", i, shortFuncName(frames[0].Function))
+	}
+	fmt.Printf("the one %%+v prints: %s\n", shortFuncName(stacktrace.Extract(err)[0].Function))
+
+	// Output:
+	// trace 0 captured in exampleLoadUser
+	// trace 1 captured in exampleQueryUser
+	// the one %+v prints: exampleLoadUser
+}

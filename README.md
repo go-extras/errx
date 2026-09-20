@@ -391,10 +391,24 @@ with every other feature. Errors that carry a trace implement `fmt.Formatter`: `
 the message followed by the captured frames (de-facto `pkg/errors` style), while `%v` and
 `%s` print the message only. The trace does not have to be attached at the outermost layer:
 wrapping a traced error again with `errx.Wrap`, `errx.Classify` or `errx.Join` keeps it
-reachable, and `%+v` at the top of a request still prints it. When several layers captured a
-trace, the outermost one is printed — the same one `stacktrace.Extract` returns — so the
-output holds one trace, not one per layer. This makes errx a **drop-in target for code
-migrating off `pkg/errors`**, where
+reachable, and `%+v` at the top of a request still prints it.
+
+When several layers captured a trace, the one printed is the outermost — what
+`stacktrace.Extract` returns — so the output holds one trace, not one per layer. That one
+is also the *least* complete: a capture taken deeper covers the same callers plus the
+frames below them. Two ways out, depending on what you need:
+
+```go
+for _, frames := range stacktrace.ExtractAll(err) { … } // every trace, outermost first
+err = stacktrace.WrapIf("load user", cause)             // capture only if none yet
+```
+
+`ExtractAll` also reaches the branches of an aggregate, which each fail independently and
+so carry unrelated traces — `%+v` prints only the first of them. Wrapping with the
+conditional helpers (`WrapIf`, `ClassifyIf`, `HereIf`) instead leaves exactly one trace in
+the chain, the earliest one, so the single trace `%+v` prints is also the most complete.
+
+This makes errx a **drop-in target for code migrating off `pkg/errors`**, where
 `log.Printf("%+v", err)` is the standard way to surface stack traces — no logging changes
 required. Errors with no trace anywhere in the chain print the message only under `%+v`,
 exactly as before.

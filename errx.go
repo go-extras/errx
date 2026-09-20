@@ -468,47 +468,96 @@ const (
 // formatTrailer writes the "%+v" tail for err: it walks the chain outermost
 // first and, at the first level whose classifications include a fmt.Formatter,
 // renders every Formatter classification of that level. Levels are the carriers
-// produced by Wrap/Classify/ClassifyNew; multi-error branches are searched in
-// order.
+// produced by Wrap/Classify/ClassifyNew; a classification that is not itself a
+// Formatter is searched as a chain of its own (so a trace attached as a
+// sentinel's parent is still found), and multi-error branches are searched in
+// argument order.
 //
 // Only classifications are rendered, never the errors of the chain itself:
 // their text is already part of the message written before the trailer, so
 // formatting them again would print it twice. Stopping at the first level that
 // has something to render keeps a chain wrapped at every layer from printing
 // one stack trace per layer; the outermost trace wins, which is what
-// stacktrace.Extract returns as well.
+// stacktrace.Extract returns as well. stacktrace.ExtractAll returns every trace
+// in the chain for callers that need more than the one this prints.
 func formatTrailer(s fmt.State, verb rune, err error) {
-	budget := formatNodeBudget
-	formatTrailerWalk(s, verb, err, 0, &budget)
+	w := formatWalker{s: s, verb: verb, budget: formatNodeBudget}
+	w.walk(err, 0, chainWalk)
 }
 
-func formatTrailerWalk(s fmt.State, verb rune, err error, depth int, budget *int) bool {
+// walkMode says which chain the trailer search is currently on. On the error's
+// own chain only classifications render, because the errors there carry the
+// message that was already written. Inside a classification there is no such
+// message, so any fmt.Formatter renders — that is how a trace attached as a
+// sentinel's parent is found.
+type walkMode uint8
+
+const (
+	chainWalk walkMode = iota
+	classificationWalk
+)
+
+// formatWalker holds the state of one trailer search: where to write, the verb
+// to render with, and how many more nodes may be visited.
+type formatWalker struct {
+	s      fmt.State
+	verb   rune
+	budget int
+}
+
+// walk searches err for something to render and reports whether it wrote
+// anything.
+func (w *formatWalker) walk(err error, depth int, mode walkMode) bool {
 	for err != nil {
-		if depth > formatMaxDepth || *budget <= 0 {
+		if depth > formatMaxDepth || w.budget <= 0 {
 			return false
 		}
-		*budget--
+		w.budget--
 
 		if c, ok := err.(*carrier); ok {
-			if formatClassifications(s, verb, c.classifications) {
+			if w.renderLevel(c, depth) {
 				return true
 			}
-			err = c.cause
-			depth++
+			err, depth = c.cause, depth+1
 			continue
 		}
 
-		if multi, ok := err.(interface{ Unwrap() []error }); ok {
-			for _, branch := range multi.Unwrap() {
-				if formatTrailerWalk(s, verb, branch, depth+1, budget) {
-					return true
-				}
+		if mode == classificationWalk {
+			if f, ok := err.(fmt.Formatter); ok {
+				f.Format(w.s, w.verb)
+				return true
 			}
-			return false
 		}
 
-		err = errors.Unwrap(err)
-		depth++
+		if multi, ok := err.(interface{ Unwrap() []error }); ok {
+			return w.walkBranches(multi.Unwrap(), depth, mode)
+		}
+
+		err, depth = errors.Unwrap(err), depth+1
+	}
+	return false
+}
+
+// renderLevel renders the Formatter classifications attached at c, or, when
+// none of them renders on its own, searches the chain of each classification.
+func (w *formatWalker) renderLevel(c *carrier, depth int) bool {
+	if formatClassifications(w.s, w.verb, c.classifications) {
+		return true
+	}
+	for _, cls := range c.classifications {
+		if w.walk(cls, depth+1, classificationWalk) {
+			return true
+		}
+	}
+	return false
+}
+
+// walkBranches searches the members of a multi-error in argument order.
+func (w *formatWalker) walkBranches(branches []error, depth int, mode walkMode) bool {
+	for _, branch := range branches {
+		if w.walk(branch, depth+1, mode) {
+			return true
+		}
 	}
 	return false
 }

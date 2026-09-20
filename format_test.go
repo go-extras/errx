@@ -290,3 +290,31 @@ func TestJoinFormat(t *testing.T) {
 		})
 	}
 }
+
+// TestFormatFindsFormatterInsideAClassificationChain covers the shape where the
+// renderer sits inside a classification's own chain rather than being the
+// classification itself, e.g. a sentinel declared with a captured trace as its
+// parent. stacktrace.Extract walks into classification chains, so "%+v" has to
+// as well or the two disagree about which traces exist.
+func TestFormatFindsFormatterInsideAClassificationChain(t *testing.T) {
+	base := errors.New("base failure")
+	tagged := errx.NewSentinel("child", fmtClassification{marker: "\n>>frames<<"})
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"classify", errx.Classify(base, tagged), "base failure\n>>frames<<"},
+		{"under an outer wrap", errx.Wrap("ctx", errx.Classify(base, tagged)), "ctx: base failure\n>>frames<<"},
+		{"beside a plain classification", errx.Classify(base, errx.Attrs("k", "v"), tagged), "base failure\n>>frames<<"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fmt.Sprintf("%+v", tc.err); got != tc.want {
+				t.Errorf("%%+v = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
