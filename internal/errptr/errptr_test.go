@@ -36,9 +36,9 @@ func (e *unhashableError) Error() string {
 }
 
 func TestGet_Nil(t *testing.T) {
-	ptr := errptr.Get(nil)
-	if ptr != 0 {
-		t.Errorf("Get(nil) = %v, want 0", ptr)
+	id := errptr.Get(nil)
+	if !id.IsZero() {
+		t.Errorf("Get(nil) = %v, want zero ID", id)
 	}
 }
 
@@ -52,9 +52,8 @@ func makeTypedNil() error {
 }
 
 // TestGet_TypedNil verifies that typed-nil errors (an interface with a
-// non-nil type pointer but a nil data pointer) return 0. Returning 0 lets
-// callers' "skip if 0" sentinel handling work correctly, instead of having
-// multiple typed-nil errors collide on the same non-zero key.
+// non-nil type pointer but a nil data pointer) return a zero ID, so callers
+// can skip recording untrackable errors in their visited sets.
 func TestGet_TypedNil(t *testing.T) {
 	e := makeTypedNil() // interface holding typed-nil
 
@@ -62,26 +61,26 @@ func TestGet_TypedNil(t *testing.T) {
 		t.Fatal("test precondition failed: typed-nil should compare != nil as interface")
 	}
 
-	ptr := errptr.Get(e)
-	if ptr != 0 {
-		t.Errorf("Get(typed-nil) = %v, want 0", ptr)
+	id := errptr.Get(e)
+	if !id.IsZero() {
+		t.Errorf("Get(typed-nil) = %v, want zero ID", id)
 	}
 }
 
 // TestGet_TypedNil_DAGCollision verifies that two distinct typed-nil errors
-// of the same underlying type both yield 0 and therefore do not falsely
-// appear as the same identity for visited-set tracking (callers use 0 as a
+// of the same underlying type both yield a zero ID and therefore do not falsely
+// appear as the same identity for visited-set tracking (callers use a zero ID as a
 // sentinel meaning "do not record"). Prior to the fix, both returned the
 // same non-zero key, causing spurious "(circular reference)" reports.
 func TestGet_TypedNil_DAGCollision(t *testing.T) {
 	e1 := makeTypedNil()
 	e2 := makeTypedNil()
 
-	ptr1 := errptr.Get(e1)
-	ptr2 := errptr.Get(e2)
+	id1 := errptr.Get(e1)
+	id2 := errptr.Get(e2)
 
-	if ptr1 != 0 || ptr2 != 0 {
-		t.Errorf("typed-nil pointers should return 0, got ptr1=%v ptr2=%v", ptr1, ptr2)
+	if !id1.IsZero() || !id2.IsZero() {
+		t.Errorf("typed-nil errors should return zero IDs, got id1=%v id2=%v", id1, id2)
 	}
 }
 
@@ -90,14 +89,14 @@ func TestGet_PointerError_SameInstance(t *testing.T) {
 	var e1 error = err
 	var e2 error = err
 
-	ptr1 := errptr.Get(e1)
-	ptr2 := errptr.Get(e2)
+	id1 := errptr.Get(e1)
+	id2 := errptr.Get(e2)
 
-	if ptr1 != ptr2 {
-		t.Errorf("Same instance should have same pointer: %v != %v", ptr1, ptr2)
+	if id1 != id2 {
+		t.Errorf("Same instance should have same identity: %v != %v", id1, id2)
 	}
-	if ptr1 == 0 {
-		t.Error("Pointer should not be 0 for non-nil error")
+	if id1.IsZero() {
+		t.Error("Identity should not be zero for non-nil error")
 	}
 }
 
@@ -105,28 +104,27 @@ func TestGet_PointerError_DifferentInstances(t *testing.T) {
 	err1 := &pointerError{msg: "test"}
 	err2 := &pointerError{msg: "test"}
 
-	ptr1 := errptr.Get(err1)
-	ptr2 := errptr.Get(err2)
+	id1 := errptr.Get(err1)
+	id2 := errptr.Get(err2)
 
-	if ptr1 == ptr2 {
-		t.Errorf("Different instances should have different pointers: %v == %v", ptr1, ptr2)
+	if id1 == id2 {
+		t.Errorf("Different instances should have different identities: %v == %v", id1, id2)
 	}
 }
 
 func TestGet_ValueError_SameVariable(t *testing.T) {
-	// Note: When a value error is assigned to an interface, the interface
-	// stores a copy of the value. Each assignment creates a new copy.
+	// Value errors are boxed when converted to interfaces. The compiler
+	// may reuse storage, so distinct conversions need not have distinct IDs.
 	valErr := valueError{msg: "test"}
 	var e1 error = valErr
 	var e2 error = valErr
 
-	ptr1 := errptr.Get(e1)
-	ptr2 := errptr.Get(e2)
+	id1 := errptr.Get(e1)
+	id2 := errptr.Get(e2)
 
-	// These will be different because each assignment to interface creates a new copy
-	// This is expected behavior - we're testing pointer identity, not value equality
-	if ptr1 == 0 || ptr2 == 0 {
-		t.Error("Pointers should not be 0 for non-nil errors")
+	// Both conversions must have trackable identities.
+	if id1.IsZero() || id2.IsZero() {
+		t.Error("Identities should not be zero for non-nil errors")
 	}
 }
 
@@ -135,16 +133,16 @@ func TestGet_ValueError_DifferentValues(t *testing.T) {
 	var e1 error = valueError{msg: "test1"}
 	var e2 error = valueError{msg: "test2"}
 
-	ptr1 := errptr.Get(e1)
-	ptr2 := errptr.Get(e2)
+	id1 := errptr.Get(e1)
+	id2 := errptr.Get(e2)
 
-	if ptr1 == 0 || ptr2 == 0 {
-		t.Error("Pointers should not be 0 for non-nil errors")
+	if id1.IsZero() || id2.IsZero() {
+		t.Error("Identities should not be zero for non-nil errors")
 	}
 
-	// Different values should have different pointers
-	if ptr1 == ptr2 {
-		t.Errorf("Different value errors should have different pointers, got ptr1=%v ptr2=%v", ptr1, ptr2)
+	// Different values should have different identities
+	if id1 == id2 {
+		t.Errorf("Different value errors should have different identities, got id1=%v id2=%v", id1, id2)
 	}
 }
 
@@ -155,31 +153,31 @@ func TestGet_UnhashableError(t *testing.T) {
 		data: map[string]any{"key": "value"},
 	}
 
-	ptr := errptr.Get(err)
-	if ptr == 0 {
-		t.Error("Pointer should not be 0 for non-nil error")
+	id := errptr.Get(err)
+	if id.IsZero() {
+		t.Error("Identity should not be zero for non-nil error")
 	}
 }
 
 func TestGet_StandardError(t *testing.T) {
 	err := errors.New("standard error")
-	ptr := errptr.Get(err)
+	id := errptr.Get(err)
 
-	if ptr == 0 {
-		t.Error("Pointer should not be 0 for non-nil error")
+	if id.IsZero() {
+		t.Error("Identity should not be zero for non-nil error")
 	}
 }
 
 func TestGet_Consistency(t *testing.T) {
-	// Calling Get multiple times on the same error should return the same pointer
+	// Calling Get multiple times on the same error should return the same identity
 	err := &pointerError{msg: "test"}
 
-	ptr1 := errptr.Get(err)
-	ptr2 := errptr.Get(err)
-	ptr3 := errptr.Get(err)
+	id1 := errptr.Get(err)
+	id2 := errptr.Get(err)
+	id3 := errptr.Get(err)
 
-	if ptr1 != ptr2 || ptr2 != ptr3 {
-		t.Errorf("Multiple calls should return same pointer: %v, %v, %v", ptr1, ptr2, ptr3)
+	if id1 != id2 || id2 != id3 {
+		t.Errorf("Multiple calls should return same identity: %v, %v, %v", id1, id2, id3)
 	}
 }
 
@@ -187,10 +185,54 @@ func TestGet_WrappedError(t *testing.T) {
 	inner := &pointerError{msg: "inner"}
 	outer := &pointerError{msg: "outer"}
 
-	ptrInner := errptr.Get(inner)
-	ptrOuter := errptr.Get(outer)
+	idInner := errptr.Get(inner)
+	idOuter := errptr.Get(outer)
 
-	if ptrInner == ptrOuter {
-		t.Error("Different errors should have different pointers")
+	if idInner == idOuter {
+		t.Error("Different errors should have different identities")
+	}
+}
+
+type firstFieldError struct{ inner pointerError }
+
+func (e *firstFieldError) Error() string { return e.inner.Error() }
+
+// TestGet_FirstField distinguishes different types at the same address.
+func TestGet_FirstField(t *testing.T) {
+	err := &firstFieldError{inner: pointerError{msg: "test"}}
+	if errptr.Get(err) == errptr.Get(&err.inner) {
+		t.Fatal("wrapper and first-field cause must have different identities")
+	}
+}
+
+type zeroErrorA struct{}
+type zeroErrorB struct{}
+
+func (zeroErrorA) Error() string { return "a" }
+func (zeroErrorB) Error() string { return "b" }
+
+// TestGet_ZeroSizeDistinctTypes checks values and pointers to zero-size errors.
+func TestGet_ZeroSizeDistinctTypes(t *testing.T) {
+	if errptr.Get(zeroErrorA{}) == errptr.Get(zeroErrorB{}) {
+		t.Fatal("different zero-size value types must have different identities")
+	}
+	a := &zeroErrorA{}
+	b := (*zeroErrorB)(a) // Guarantee the same address for the pointer case.
+	if errptr.Get(a) == errptr.Get(b) {
+		t.Fatal("different zero-size pointer types must have different identities")
+	}
+}
+
+type unhashableValueError []string
+
+func (unhashableValueError) Error() string { return "unhashable" }
+
+// TestGet_UnhashableValue verifies that IDs do not hash the dynamic error value.
+func TestGet_UnhashableValue(t *testing.T) {
+	var err error = unhashableValueError{"test"}
+	id := errptr.Get(err)
+	seen := map[errptr.ID]bool{id: true}
+	if !seen[errptr.Get(err)] {
+		t.Fatal("the same unhashable error must retain its identity")
 	}
 }

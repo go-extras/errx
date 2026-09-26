@@ -191,34 +191,34 @@ func ToSerializedError(err error, opts ...Option) *SerializedError {
 //
 // The set is allocated lazily on first use through enterVisited so that
 // single-node errors never pay for the map allocation.
-type visitedSet map[uintptr]bool
+type visitedSet map[errptr.ID]bool
 
-// enterVisited records ptr in the visited set, allocating it lazily on first
-// use. It returns true if ptr was already present (a cycle on the current
-// path). A zero ptr is treated as "not trackable" — neither recorded nor
+// enterVisited records id in the visited set, allocating it lazily on first
+// use. It returns true if id was already present (a cycle on the current
+// path). A zero ID is treated as "not trackable" — neither recorded nor
 // flagged as a cycle.
-func enterVisited(visited *visitedSet, ptr uintptr) bool {
-	if ptr == 0 {
+func enterVisited(visited *visitedSet, id errptr.ID) bool {
+	if id.IsZero() {
 		return false
 	}
 	if *visited == nil {
-		*visited = visitedSet{ptr: true}
+		*visited = visitedSet{id: true}
 		return false
 	}
-	if (*visited)[ptr] {
+	if (*visited)[id] {
 		return true
 	}
-	(*visited)[ptr] = true
+	(*visited)[id] = true
 	return false
 }
 
-// exitVisited removes ptr from the visited set so siblings of a DAG branch
-// do not poison each other. Safe to call with a zero ptr or a nil set.
-func exitVisited(visited *visitedSet, ptr uintptr) {
-	if ptr == 0 || *visited == nil {
+// exitVisited removes id from the visited set so siblings of a DAG branch
+// do not poison each other. Safe to call with a zero ID or a nil set.
+func exitVisited(visited *visitedSet, id errptr.ID) {
+	if id.IsZero() || *visited == nil {
 		return
 	}
-	delete(*visited, ptr)
+	delete(*visited, id)
 }
 
 // toSerializedError recursively converts an error to SerializedError.
@@ -245,11 +245,11 @@ func toSerializedError(err error, cfg *config, visited *visitedSet, depth int) *
 	node, levelCls, nextCause := peelLevel(err)
 
 	// Per-path cycle detection. Pop on exit so DAGs serialize fully.
-	ptr := errptr.Get(node)
-	if enterVisited(visited, ptr) {
+	id := errptr.Get(node)
+	if enterVisited(visited, id) {
 		return &SerializedError{Message: "(circular reference)"}
 	}
-	defer exitVisited(visited, ptr)
+	defer exitVisited(visited, id)
 
 	result := &SerializedError{
 		Message: truncateMessage(node.Error(), cfg.maxMessageBytes),

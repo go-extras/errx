@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Error traversal distinguishes types at the same address** ([#56]) — cycle detection now keys errors by both their type and data words. A cause stored as its wrapper's first field and distinct zero-size error types no longer lose attributes or stack traces or produce a false circular-reference marker in JSON. `ExtractAttrs` also skips untrackable typed-nil identities so separate nil-safe branches remain reachable. The larger identity keys increase memory used by visited maps on deep chains; allocation counts are unchanged in the measured benchmarks.
+
 - **`%+v` no longer loses a stack trace captured deeper in the chain** ([#54]) — the `fmt.Formatter` support added in [#45] rendered only the classifications attached at the layer being formatted, so wrapping a traced error again with `errx.Wrap`, `errx.Classify` or `errx.Join` collapsed `%+v` back to the message. That defeated the migration case it was written for: in `github.com/pkg/errors` every wrapper formats its cause, so `log.Printf("%+v", err)` at the top of a request prints the innermost stack no matter how many layers sit above it. Formatting now walks the chain outermost first and renders the classifications of the first level that has any, so one trace surfaces, not one per layer (the outermost, matching `stacktrace.Extract`). `errx.Join` results implement `fmt.Formatter` for the first time, and `errx.Wrap` without classifications returns an errx wrapper instead of `fmt.Errorf`'s, so that layer can take part as well. `Error`, `Unwrap`, `errors.Is`/`errors.As` and the `json` output are unchanged, and the walk is bounded so a cyclic chain cannot hang the formatter. Which trace is printed when a chain holds more than one is now documented in the `stacktrace` package, along with the alternatives. On a single unwrap chain `%+v` shows the outermost capture, which is the least complete of them: a capture taken deeper sits further down the same goroutine stack, so its frames cover the same callers plus everything below them. For an aggregate the picture is different — the branches fail independently and their traces are unrelated rather than more or less complete — and `%+v` shows the first branch that carries one, leaving the rest unprinted. `stacktrace.ExtractAll` returns all of them either way (outermost first, branches in argument order), and the conditional helpers `WrapIf`/`ClassifyIf`/`HereIf` leave exactly one trace in a chain to begin with. One behavior change worth noting: like the classification-carrying wrapper since [#45], a classification-less `errx.Wrap` now composes its message lazily, so constructing and printing once is cheaper (90ns/3 allocs to 30ns/2 allocs) while repeated `Error()` calls on the same value recompute the string instead of returning a cached one.
 
 - **`HereIf` no longer leaks an empty sentinel into JSON** ([#55]) — when the cause already carried a trace, `HereIf`/`HereIfDepth` returned an inert `Classified` with empty text. `Wrap`/`Classify` attached it like any other classification, so `json.Marshal` emitted `"sentinels":[""]` and `Classify(cause, HereIf(cause))` allocated a carrier that held nothing. They now return nil, which `Wrap`/`Classify` have dropped since [#15]: `Classify` returns the cause unchanged and `Wrap` adds only the text. The error message and the trace reported by `Extract` and `%+v` are the same as before.
@@ -151,6 +153,7 @@ This release lands a large set of improvements across the core package and every
 [#45]: https://github.com/go-extras/errx/issues/45
 [#54]: https://github.com/go-extras/errx/issues/54
 [#55]: https://github.com/go-extras/errx/issues/55
+[#56]: https://github.com/go-extras/errx/issues/56
 
 ## [1.2.1] - 2026-01-31
 
@@ -308,4 +311,3 @@ This release provides a complete, production-ready error handling solution with 
 [1.2.0]: https://github.com/go-extras/errx/releases/tag/v1.2.0
 [1.1.0]: https://github.com/go-extras/errx/releases/tag/v1.1.0
 [1.0.0]: https://github.com/go-extras/errx/releases/tag/v1.0.0
-
