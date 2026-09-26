@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 
 	"github.com/go-extras/errx/internal/errptr"
@@ -322,7 +323,7 @@ func HasAttrs(err error) bool {
 		return false
 	}
 
-	visited := make(map[uintptr]bool)
+	visited := make(map[errptr.ID]bool)
 	queue := []error{err}
 
 	for len(queue) > 0 {
@@ -333,12 +334,12 @@ func HasAttrs(err error) bool {
 			continue
 		}
 
-		ptr := errptr.Get(current)
-		if ptr != 0 {
-			if visited[ptr] {
+		id := errptr.Get(current)
+		if !id.IsZero() {
+			if visited[id] {
 				continue
 			}
-			visited[ptr] = true
+			visited[id] = true
 		}
 
 		if aErr, ok := current.(*attributed); ok {
@@ -381,7 +382,8 @@ func ExtractAttrs(err error) AttrList {
 	}
 
 	var allAttrs []Attr
-	visited := make(map[uintptr]bool)
+	visited := make(map[errptr.ID]bool)
+	var visitedNils map[reflect.Type]bool
 
 	// Use a queue for breadth-first traversal to handle multi-errors
 	queue := []error{err}
@@ -391,16 +393,29 @@ func ExtractAttrs(err error) AttrList {
 		queue = queue[1:]
 
 		// Skip if already visited (avoid cycles). The visited set is keyed on
-		// pointer identity via errptr.Get, which for an *attributed returns that
-		// same pointer. A shared *attributed reachable through several paths is
-		// therefore deduplicated here — before its attrs are collected below —
+		// type-and-data identity via errptr.Get. A shared *attributed reachable
+		// through several paths is deduplicated before its attrs are collected,
 		// so it can never contribute twice.
-		if current != nil {
-			ptr := errptr.Get(current)
-			if visited[ptr] {
+		if current == nil {
+			continue
+		}
+		id := errptr.Get(current)
+		if id.IsZero() {
+			// Nil-safe Unwrap methods can expose attributes or form cycles.
+			// Track nils by type so distinct nil branches remain reachable.
+			typ := reflect.TypeOf(current)
+			if visitedNils[typ] {
 				continue
 			}
-			visited[ptr] = true
+			if visitedNils == nil {
+				visitedNils = make(map[reflect.Type]bool)
+			}
+			visitedNils[typ] = true
+		} else {
+			if visited[id] {
+				continue
+			}
+			visited[id] = true
 		}
 
 		// Collect attributes from an attributed error directly.

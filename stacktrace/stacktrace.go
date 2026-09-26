@@ -215,7 +215,7 @@ func hasTrace(err error) bool {
 	}
 	w := &traceWalker{
 		seenTraced:   make(map[*traced]struct{}),
-		seenErr:      make(map[uintptr]struct{}),
+		seenErr:      make(map[errptr.ID]struct{}),
 		presenceOnly: true,
 	}
 	w.walk(err)
@@ -388,7 +388,7 @@ func ExtractAll(err error) [][]Frame {
 		// errptr.Get returns a hashable identity that works for both
 		// pointer-based and value-based errors without panicking on
 		// unhashable types.
-		seenErr: make(map[uintptr]struct{}),
+		seenErr: make(map[errptr.ID]struct{}),
 	}
 	w.walk(err)
 
@@ -404,7 +404,7 @@ func ExtractAll(err error) [][]Frame {
 type traceWalker struct {
 	traces       [][]Frame
 	seenTraced   map[*traced]struct{}
-	seenErr      map[uintptr]struct{}
+	seenErr      map[errptr.ID]struct{}
 	presenceOnly bool
 	found        bool
 }
@@ -436,7 +436,7 @@ func (w *traceWalker) walk(err error) {
 // already visited.
 func (w *traceWalker) markSeen(err error) bool {
 	id := errptr.Get(err)
-	if id == 0 {
+	if id.IsZero() {
 		return true
 	}
 	if _, already := w.seenErr[id]; already {
