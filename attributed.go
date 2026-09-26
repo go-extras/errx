@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 
 	"github.com/go-extras/errx/internal/errptr"
@@ -382,6 +383,7 @@ func ExtractAttrs(err error) AttrList {
 
 	var allAttrs []Attr
 	visited := make(map[errptr.ID]bool)
+	var visitedNils map[reflect.Type]bool
 
 	// Use a queue for breadth-first traversal to handle multi-errors
 	queue := []error{err}
@@ -394,14 +396,26 @@ func ExtractAttrs(err error) AttrList {
 		// type-and-data identity via errptr.Get. A shared *attributed reachable
 		// through several paths is deduplicated before its attrs are collected,
 		// so it can never contribute twice.
-		if current != nil {
-			id := errptr.Get(current)
-			if !id.IsZero() {
-				if visited[id] {
-					continue
-				}
-				visited[id] = true
+		if current == nil {
+			continue
+		}
+		id := errptr.Get(current)
+		if id.IsZero() {
+			// Nil-safe Unwrap methods can expose attributes or form cycles.
+			// Track nils by type so distinct nil branches remain reachable.
+			typ := reflect.TypeOf(current)
+			if visitedNils[typ] {
+				continue
 			}
+			if visitedNils == nil {
+				visitedNils = make(map[reflect.Type]bool)
+			}
+			visitedNils[typ] = true
+		} else {
+			if visited[id] {
+				continue
+			}
+			visited[id] = true
 		}
 
 		// Collect attributes from an attributed error directly.

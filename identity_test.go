@@ -148,6 +148,31 @@ func TestIdentity_TypedNilBranches(t *testing.T) {
 	}
 }
 
+type nilCycleError struct{}
+
+var nilCycleUnwraps int
+
+func (*nilCycleError) Error() string { return "nil cycle" }
+func (e *nilCycleError) Unwrap() error {
+	nilCycleUnwraps++
+	if nilCycleUnwraps > 1 {
+		// Bound the reproducer so a broken walker fails instead of hanging.
+		panic("typed-nil cycle visited more than once")
+	}
+	return e
+}
+
+// TestIdentity_TypedNilCycle preserves ExtractAttrs' termination on nil cycles.
+func TestIdentity_TypedNilCycle(t *testing.T) {
+	nilCycleUnwraps = 0
+	if got := errx.ExtractAttrs((*nilCycleError)(nil)); got != nil {
+		t.Errorf("ExtractAttrs = %v, want nil", got)
+	}
+	if nilCycleUnwraps != 1 {
+		t.Errorf("Unwrap calls = %d, want 1", nilCycleUnwraps)
+	}
+}
+
 type identityCycle struct{ next error }
 
 func (*identityCycle) Error() string   { return "cycle" }
