@@ -541,9 +541,18 @@ func addPureSentinels(classifications []errx.Classified, sentinels *[]string, se
 	}
 }
 
-// isPureSentinel checks if a classified error is a pure sentinel.
+// isPureSentinel excludes attribute and trace carriers by their own type,
+// including empty external implementations. An attributed or traced parent
+// does not change a sentinel's kind. Displayable detection remains chain-wide
+// because errx does not yet expose a displayable-kind interface.
 func isPureSentinel(cls errx.Classified) bool {
-	return !errx.IsDisplayable(cls) && !errx.HasAttrs(cls) && stacktrace.Extract(cls) == nil
+	// Use the public attribute interface here when issue #63 introduces it.
+	switch cls.(type) {
+	case interface{ Attrs() []errx.Attr }, stacktrace.Tracer:
+		return false
+	default:
+		return !errx.IsDisplayable(cls)
+	}
 }
 
 // addSelfAsPureSentinel checks if the error itself is a pure sentinel and adds it.

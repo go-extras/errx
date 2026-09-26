@@ -118,6 +118,14 @@ The serialized error has the following structure:
 
 Fields are omitted if empty (using `omitempty` tags).
 
+The `sentinels` field excludes classifications that implement `Attrs() []errx.Attr`
+or `stacktrace.Tracer`, even when their attributes or frames are empty. This
+includes external implementations: an empty trace carrier's text is not a
+sentinel. Standalone errors still retain their `Error()` text in `message`.
+Sentinels with attributed or traced parents keep their own sentinel text;
+classifications with a displayable anywhere in their chain remain excluded from
+`sentinels` and provide `display_text` instead.
+
 ## Examples
 
 ### Displayable Error
