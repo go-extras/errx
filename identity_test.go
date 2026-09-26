@@ -178,6 +178,11 @@ type identityCycle struct{ next error }
 func (*identityCycle) Error() string   { return "cycle" }
 func (e *identityCycle) Unwrap() error { return e.next }
 
+type identityBranches []error
+
+func (identityBranches) Error() string     { return "branches" }
+func (e identityBranches) Unwrap() []error { return e }
+
 // TestIdentity_CyclesAndSharedNodes verifies termination and deduplication.
 func TestIdentity_CyclesAndSharedNodes(t *testing.T) {
 	a, b := &identityCycle{}, &identityCycle{}
@@ -186,7 +191,8 @@ func TestIdentity_CyclesAndSharedNodes(t *testing.T) {
 		t.Fatal("cycle without metadata must not produce attributes or traces")
 	}
 	shared := errx.Classify(errors.New("shared"), errx.Attrs("key", "value"), stacktrace.Here())
-	err := errors.Join(a, shared, shared)
+	// A custom multi-error can contain nil children and need not be comparable.
+	err := identityBranches{nil, a, shared, shared}
 	if !errx.HasAttrs(err) || len(errx.ExtractAttrs(err)) != 1 {
 		t.Error("shared attributes should be found once after the cyclic branch")
 	}
