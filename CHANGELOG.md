@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Conditional stack capture in `stacktrace`** ([#40]) — new helpers capture a stack trace only when the cause chain does not already carry one, mirroring `emperror.dev/errors`'s `WrapIf`/`WithStackIf` pattern without pulling traces into the zero-dependency core:
-  - `HereIf` / `HereIfDepth` — return a no-op `Classified` when `HasTrace(cause)` is true, otherwise behave like `Here`/`HereDepth`.
+  - `HereIf` / `HereIfDepth` — return nil when `HasTrace(cause)` is true, otherwise behave like `Here`/`HereDepth`. The result is meant to be passed to `Wrap`/`Classify`/`ClassifyNew`, which drop nil classifications.
   - `WrapIf` / `WrapIfDepth` and `ClassifyIf` / `ClassifyIfDepth` — wrap or classify without duplicating an existing trace.
   - `HasTrace(err) bool` — early-exit presence check across unwrap chains, carrier classifications, multi-error branches, and external `Tracer` implementations (empty frame lists do not count).
 
@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`%+v` no longer loses a stack trace captured deeper in the chain** ([#54]) — the `fmt.Formatter` support added in [#45] rendered only the classifications attached at the layer being formatted, so wrapping a traced error again with `errx.Wrap`, `errx.Classify` or `errx.Join` collapsed `%+v` back to the message. That defeated the migration case it was written for: in `github.com/pkg/errors` every wrapper formats its cause, so `log.Printf("%+v", err)` at the top of a request prints the innermost stack no matter how many layers sit above it. Formatting now walks the chain outermost first and renders the classifications of the first level that has any, so one trace surfaces, not one per layer (the outermost, matching `stacktrace.Extract`). `errx.Join` results implement `fmt.Formatter` for the first time, and `errx.Wrap` without classifications returns an errx wrapper instead of `fmt.Errorf`'s, so that layer can take part as well. `Error`, `Unwrap`, `errors.Is`/`errors.As` and the `json` output are unchanged, and the walk is bounded so a cyclic chain cannot hang the formatter. Which trace is printed when a chain holds more than one is now documented in the `stacktrace` package, along with the alternatives. On a single unwrap chain `%+v` shows the outermost capture, which is the least complete of them: a capture taken deeper sits further down the same goroutine stack, so its frames cover the same callers plus everything below them. For an aggregate the picture is different — the branches fail independently and their traces are unrelated rather than more or less complete — and `%+v` shows the first branch that carries one, leaving the rest unprinted. `stacktrace.ExtractAll` returns all of them either way (outermost first, branches in argument order), and the conditional helpers `WrapIf`/`ClassifyIf`/`HereIf` leave exactly one trace in a chain to begin with. One behavior change worth noting: like the classification-carrying wrapper since [#45], a classification-less `errx.Wrap` now composes its message lazily, so constructing and printing once is cheaper (90ns/3 allocs to 30ns/2 allocs) while repeated `Error()` calls on the same value recompute the string instead of returning a cached one.
+
+- **`HereIf` no longer leaks an empty sentinel into JSON** ([#55]) — when the cause already carried a trace, `HereIf`/`HereIfDepth` returned an inert `Classified` with empty text. `Wrap`/`Classify` attached it like any other classification, so `json.Marshal` emitted `"sentinels":[""]` and `Classify(cause, HereIf(cause))` allocated a carrier that held nothing. They now return nil, which `Wrap`/`Classify` have dropped since [#15]: `Classify` returns the cause unchanged and `Wrap` adds only the text. The error message and the trace reported by `Extract` and `%+v` are the same as before.
 
 ### Changed
 
@@ -148,6 +150,7 @@ This release lands a large set of improvements across the core package and every
 [#43]: https://github.com/go-extras/errx/issues/43
 [#45]: https://github.com/go-extras/errx/issues/45
 [#54]: https://github.com/go-extras/errx/issues/54
+[#55]: https://github.com/go-extras/errx/issues/55
 
 ## [1.2.1] - 2026-01-31
 

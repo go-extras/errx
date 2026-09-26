@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-extras/errx"
 	errxjson "github.com/go-extras/errx/json"
+	"github.com/go-extras/errx/stacktrace"
 )
 
 // Bug #1: errx.Classify duplicates the cause message at every nesting level.
@@ -246,6 +247,33 @@ type customMarshaler struct{ n int }
 
 func (c customMarshaler) MarshalJSON() ([]byte, error) {
 	return []byte(`{"custom":` + itoa(c.n) + `}`), nil
+}
+
+// Issue #55: when the cause already carried a trace, HereIf returned an inert
+// Classified with empty text. Wrap attached it, and Marshal emitted it as
+// "sentinels":[""]. HereIf now returns nil, so no level has sentinels.
+func TestMarshal_HereIfWhenTracedAddsNoSentinel(t *testing.T) {
+	cause := stacktrace.Wrap("query failed", errors.New("connection reset"))
+	err := errx.Wrap("load user", cause, stacktrace.HereIf(cause))
+
+	data, marshalErr := errxjson.Marshal(err, errxjson.WithStackTrace(false))
+	if marshalErr != nil {
+		t.Fatalf("Marshal error: %v", marshalErr)
+	}
+
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if result.Message != "load user: query failed: connection reset" {
+		t.Errorf("Message = %q", result.Message)
+	}
+	for level, node := 1, &result; node != nil; level, node = level+1, node.Cause {
+		if len(node.Sentinels) != 0 {
+			t.Errorf("level %d Sentinels = %q, want none; JSON: %s", level, node.Sentinels, data)
+		}
+	}
 }
 
 func itoa(n int) string {

@@ -138,7 +138,7 @@ func TestHereIfCapturesWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestHereIfNoopWhenPresent(t *testing.T) {
+func TestHereIfNoDuplicateTraceWhenPresent(t *testing.T) {
 	baseErr := errors.New("base")
 	traced := stacktrace.Wrap("inner", baseErr)
 	err := errx.Wrap("outer", traced, stacktrace.HereIf(traced))
@@ -146,6 +146,61 @@ func TestHereIfNoopWhenPresent(t *testing.T) {
 	all := stacktrace.ExtractAll(err)
 	if len(all) != 1 {
 		t.Fatalf("expected exactly one trace, got %d", len(all))
+	}
+}
+
+// The tests below cover issue #55: when the cause already has a trace, HereIf
+// and HereIfDepth return nil, so Wrap and Classify attach nothing at all.
+
+func TestHereIfNilWhenPresent(t *testing.T) {
+	traced := stacktrace.Wrap("inner", errors.New("base"))
+
+	if c := stacktrace.HereIf(traced); c != nil {
+		t.Errorf("HereIf = %#v, want nil when cause already has a trace", c)
+	}
+	if c := stacktrace.HereIfDepth(traced, 4); c != nil {
+		t.Errorf("HereIfDepth = %#v, want nil when cause already has a trace", c)
+	}
+}
+
+func TestHereIfClassifyIsIdentityWhenPresent(t *testing.T) {
+	cause := stacktrace.Wrap("query failed", errors.New("connection reset"))
+
+	if got := errx.Classify(cause, stacktrace.HereIf(cause)); got != cause {
+		t.Errorf("Classify(cause, HereIf(cause)) = %#v, want cause unchanged", got)
+	}
+	if got := errx.Classify(cause, stacktrace.HereIfDepth(cause, 4)); got != cause {
+		t.Errorf("Classify(cause, HereIfDepth(cause, 4)) = %#v, want cause unchanged", got)
+	}
+}
+
+func TestHereIfWrapKeepsMessageAndTraceWhenPresent(t *testing.T) {
+	cause := stacktrace.Wrap("query failed", errors.New("connection reset"))
+	want := stacktrace.Extract(cause)
+
+	err := errx.Wrap("load user", cause, stacktrace.HereIf(cause))
+
+	if got := err.Error(); got != "load user: query failed: connection reset" {
+		t.Errorf("Error() = %q", got)
+	}
+	got := stacktrace.Extract(err)
+	if len(got) != len(want) {
+		t.Fatalf("Extract returned %d frames, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("frame %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	// With nothing to attach, Wrap takes its classification-less path; the
+	// cause's trace still has to surface under "%+v" (issue #54).
+	out := fmt.Sprintf("%+v", err)
+	if !strings.HasPrefix(out, "load user: query failed: connection reset") {
+		t.Errorf("expected %%+v to start with the message, got:\n%s", out)
+	}
+	if n := countFrameLines(out); n != len(want) {
+		t.Errorf("%%+v rendered %d frame lines, want %d", n, len(want))
 	}
 }
 
@@ -219,7 +274,7 @@ func TestWrapIfPreservesClassifications(t *testing.T) {
 	}
 }
 
-func TestHereIfDepthNoopWhenPresent(t *testing.T) {
+func TestHereIfDepthNoDuplicateTraceWhenPresent(t *testing.T) {
 	baseErr := errors.New("base")
 	traced := stacktrace.Wrap("inner", baseErr)
 	err := errx.Wrap("outer", traced, stacktrace.HereIfDepth(traced, 4))
