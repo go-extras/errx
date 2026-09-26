@@ -202,16 +202,6 @@ func (*traced) IsClassified() bool {
 	return true
 }
 
-// noTrace is a Classified marker returned by HereIf when cause already carries
-// a stack trace. It is inert: Extract ignores it and fmt.Formatter has nothing
-// to render.
-type noTrace struct{}
-
-func (noTrace) Error() string      { return "" }
-func (noTrace) IsClassified() bool { return true }
-
-var noopTrace errx.Classified = noTrace{}
-
 // HasTrace reports whether err, or any error reachable through its unwrap
 // chain, carrier classifications, or multi-error branches, carries a non-empty
 // stack trace (an internal *traced value or a third-party Tracer).
@@ -241,24 +231,30 @@ func captureTraceUnlessPresent(cause error, depth int) (*traced, bool) {
 	return captureStack(4, depth), true
 }
 
-// HereIf is like Here but returns a no-op classification when cause already
-// carries a stack trace, so layered wrapping does not capture duplicate traces.
+// HereIf is like Here but returns nil when cause already carries a stack trace,
+// so layered wrapping does not capture duplicate traces.
+//
+// The result may be nil. It is meant to be passed to errx.Wrap, errx.Classify
+// or errx.ClassifyNew, which drop nil classifications: with nothing else to
+// attach, Classify then returns cause unchanged and Wrap adds only the text.
+// It is not meant to be used on its own.
 //
 // Example:
 //
 //	err := errx.Wrap("operation failed", cause, ErrNotFound, stacktrace.HereIf(cause))
 func HereIf(cause error) errx.Classified {
 	if hasTrace(cause) {
-		return noopTrace
+		return nil
 	}
 	return captureStack(2, DefaultMaxDepth)
 }
 
 // HereIfDepth is like HereIf but allows the caller to specify the maximum
-// number of stack frames to capture when a new trace is needed.
+// number of stack frames to capture when a new trace is needed. Like HereIf,
+// it returns nil when cause already carries a stack trace.
 func HereIfDepth(cause error, depth int) errx.Classified {
 	if hasTrace(cause) {
-		return noopTrace
+		return nil
 	}
 	return captureStack(2, depth)
 }
