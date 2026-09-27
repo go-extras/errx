@@ -4,10 +4,14 @@ Optional stack trace support for errx errors.
 
 ## Overview
 
-The `stacktrace` package extends `errx` with stack trace capabilities while keeping the core `errx` package minimal and zero-dependency. It provides two usage patterns:
+The `stacktrace` package extends `errx` with stack trace capabilities while keeping the
+core `errx` package minimal and zero-dependency. It provides three usage patterns:
 
 1. **Per-error opt-in** using `Here()` as a `Classified`
-2. **Automatic capture** using `stacktrace.Wrap()` and `stacktrace.Classify()`
+2. **Automatic capture** using `stacktrace.Wrap()`, `stacktrace.Classify()` and
+   `stacktrace.ClassifyNew()`
+3. **Conditional capture** using `WrapIf`, `ClassifyIf` or `HereIf` to avoid duplicate traces
+   when a cause already carries one.
 
 ## Installation
 
@@ -42,7 +46,10 @@ Use `stacktrace.Wrap()` or `stacktrace.Classify()` for automatic trace capture:
 err := stacktrace.Wrap("operation failed", cause, ErrNotFound)
 
 // Or with Classify
-err := stacktrace.Classify(cause, ErrRetryable)
+err = stacktrace.Classify(cause, ErrRetryable)
+
+// Create and classify a new error
+err = stacktrace.ClassifyNew("user record missing", ErrNotFound)
 ```
 
 ### Extracting Stack Traces
@@ -56,6 +63,35 @@ if frames != nil {
         fmt.Printf("%s:%d %s\n", frame.File, frame.Line, frame.Function)
     }
 }
+```
+
+`Extract` returns the first trace in the chain. Use `ExtractAll` when several layers or
+branches may carry traces; it returns them outermost first.
+
+### Conditional Capture
+
+`WrapIf` and `ClassifyIf` capture a trace only when the cause does not already carry one.
+Their `*Depth` variants let callers choose the maximum capture depth. `HereIf` and
+`HereIfDepth` return `nil` when a trace is already present, so they can be passed to
+`errx.Wrap`, `errx.Classify` or `errx.ClassifyNew` without adding a duplicate. Use
+`HasTrace` to check for a non-empty trace before choosing your own behavior.
+
+```go
+err := stacktrace.WrapIf("load user", cause)
+if stacktrace.HasTrace(err) {
+    fmt.Println("trace is available")
+}
+```
+
+### Formatting Traces
+
+Errors returned by `stacktrace.Wrap`, `Classify` and `ClassifyNew` implement
+`fmt.Formatter`. When an error carries a trace, `%+v` prints its message followed by the
+stack frames in the `pkg/errors` style; `%v` and `%s` print only the message. `errx.Wrap`
+and `errx.Classify` also format traces attached with `stacktrace.Here()`.
+
+```go
+fmt.Printf("%+v\n", err) // message followed by stack frames
 ```
 
 ## Integration with errx Features
@@ -84,14 +120,39 @@ fmt.Println("Has stack trace:", stacktrace.Extract(err) != nil)
 
 ### Functions
 
-- `Here() errx.Classified` - Captures the current stack trace as a Classified
-- `Extract(err error) []Frame` - Extracts stack frames from an error chain
-- `Wrap(text string, cause error, classifications ...errx.Classified) error` - Wraps with automatic trace
-- `Classify(cause error, classifications ...errx.Classified) error` - Classifies with automatic trace
+- `Here() errx.Classified` captures a trace for use with `errx.Wrap`, `errx.Classify` or
+  `errx.ClassifyNew`.
+- `HereDepth(depth int) errx.Classified` captures up to the requested number of frames.
+- `Wrap(text string, cause error, classifications ...errx.Classified) error` and
+  `WrapDepth(text string, cause error, depth int, classifications ...errx.Classified) error`
+  wrap an error and capture a trace.
+- `Classify(cause error, classifications ...errx.Classified) error` and
+  `ClassifyDepth(cause error, depth int, classifications ...errx.Classified) error`
+  add classifications and capture a trace.
+- `ClassifyNew(text string, classifications ...errx.Classified) error` and
+  `ClassifyNewDepth(text string, depth int, classifications ...errx.Classified) error`
+  create and classify an error with a trace.
+- `WrapIf(text string, cause error, classifications ...errx.Classified) error` and
+  `WrapIfDepth(text string, cause error, depth int, classifications ...errx.Classified) error`
+  capture only when the cause has no trace.
+- `ClassifyIf(cause error, classifications ...errx.Classified) error` and
+  `ClassifyIfDepth(cause error, depth int, classifications ...errx.Classified) error`
+  classify and capture only when needed.
+- `HereIf(cause error) errx.Classified` and `HereIfDepth(cause error, depth int) errx.Classified`
+  return `nil` when the cause already carries a trace.
+- `Extract(err error) []Frame` returns the first trace in the error chain;
+  `ExtractAll(err error) [][]Frame` returns all traces, outermost first.
+- `HasTrace(err error) bool` reports whether the chain contains a non-empty trace.
+
+### Constants
+
+- `DefaultMaxDepth` is 32. Non-positive depth values use this default.
+- `MaxDepth` is 256. Larger requested depths are clamped to this ceiling.
 
 ### Types
 
-- `Frame` - Represents a single stack frame with `File`, `Line`, and `Function` fields
+- `Frame` represents a stack frame with `File`, `Line` and `Function` fields.
+- `Tracer` is implemented by errors that expose captured frames through `Frames() []Frame`.
 
 ## Performance Considerations
 
