@@ -119,6 +119,11 @@ jsonBytes, _ := errxjson.Marshal(err, errxjson.WithSentinels(false))
 Rewrite or redact each attribute value during serialization. The transformer receives the
 attribute key and value, and is called only when attributes are included.
 
+Note that this only transforms values in the `attributes` field, not in `message`. For example,
+serializing `errx.Attrs("token", "secret")` with this transformer still includes `"message": "token=secret"`.
+Similarly, `WithAttributes(false)` only suppresses the `attributes` field, leaving the message intact.
+Neither option guarantees that sensitive values are omitted from the serialized JSON if they are present in the error message.
+
 ```go
 jsonBytes, _ := errxjson.Marshal(err, errxjson.WithAttributeValueTransformer(
     func(key string, value any) any {
@@ -143,8 +148,9 @@ jsonBytes, _ := errxjson.Marshal(err,
 ### WithMaxMessageBytes
 
 Limit each serialized error message to at most `n` bytes. When truncation is needed, the
-suffix `...(truncated)` is appended without splitting a UTF-8 character. The default
-`0` leaves messages unchanged.
+suffix `...(truncated)` is appended without splitting a UTF-8 character. If `n` is 14
+bytes or less (the length of the suffix), a hard cut at the byte limit is used instead
+without appending the suffix. The default `0` leaves messages unchanged.
 
 ```go
 jsonBytes, _ := errxjson.Marshal(err, errxjson.WithMaxMessageBytes(256))
