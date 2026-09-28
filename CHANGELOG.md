@@ -316,3 +316,4 @@ This release provides a complete, production-ready error handling solution with 
 [1.2.0]: https://github.com/go-extras/errx/releases/tag/v1.2.0
 [1.1.0]: https://github.com/go-extras/errx/releases/tag/v1.1.0
 [1.0.0]: https://github.com/go-extras/errx/releases/tag/v1.0.0
+[#67]: https://github.com/go-extras/errx/issues/67
