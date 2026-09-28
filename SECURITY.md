@@ -13,7 +13,7 @@ Security fixes are provided for the latest minor release line.
 
 We take the security of `errx` seriously. If you believe you have discovered a vulnerability, please do **not** disclose it publicly via public GitHub issues, pull requests, or discussions.
 
-Please report vulnerabilities confidentially through GitHub's [Private Vulnerability Reporting](https://github.com/go-extras/errx/security/advisories/new) (if enabled for this repository) or directly to the project maintainer via email at [denis@vojt.uk](mailto:denis@vojt.uk).
+Please report vulnerabilities confidentially through GitHub's [Private Vulnerability Reporting](https://github.com/go-extras/errx/security/advisories/new).
 
 ### Information to Include
 
