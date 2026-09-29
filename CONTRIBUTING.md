@@ -4,7 +4,7 @@ Thank you for your interest in contributing to errx! This document provides guid
 
 ## Code of Conduct
 
-By participating in this project, you agree to maintain a respectful and inclusive environment for all contributors.
+This project and everyone participating in it is governed by the [errx Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
 
 ## How to Contribute
 
@@ -232,7 +232,7 @@ Releases are managed by maintainers and follow semantic versioning:
 - **Questions:** Open a question issue or discussion
 - **Bugs:** Open a bug report with reproduction steps
 - **Features:** Open a feature request with use cases
-- **Security:** Email security issues privately to maintainers
+- **Security:** Report security issues confidentially through [GitHub Private Vulnerability Reporting](https://github.com/go-extras/errx/security/advisories/new) (see [SECURITY.md](SECURITY.md))
 
 ## Recognition
 

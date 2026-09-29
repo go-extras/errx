@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Repository community health and security governance** ([#67]) — adds `SECURITY.md` defining supported release lines and private vulnerability reporting, adds `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), and updates `CONTRIBUTING.md` references.
+
 - **Conditional stack capture in `stacktrace`** ([#40]) — new helpers capture a stack trace only when the cause chain does not already carry one, mirroring `emperror.dev/errors`'s `WrapIf`/`WithStackIf` pattern without pulling traces into the zero-dependency core:
   - `HereIf` / `HereIfDepth` — return nil when `HasTrace(cause)` is true, otherwise behave like `Here`/`HereDepth`. The result is meant to be passed to `Wrap`/`Classify`/`ClassifyNew`, which drop nil classifications.
   - `WrapIf` / `WrapIfDepth` and `ClassifyIf` / `ClassifyIfDepth` — wrap or classify without duplicating an existing trace.
@@ -316,3 +318,4 @@ This release provides a complete, production-ready error handling solution with 
 [1.2.0]: https://github.com/go-extras/errx/releases/tag/v1.2.0
 [1.1.0]: https://github.com/go-extras/errx/releases/tag/v1.1.0
 [1.0.0]: https://github.com/go-extras/errx/releases/tag/v1.0.0
+[#67]: https://github.com/go-extras/errx/issues/67
