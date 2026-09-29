@@ -86,6 +86,76 @@ Control whether standard (non-errx) errors in the error chain are included.
 jsonBytes, _ := errxjson.Marshal(err, errxjson.WithIncludeStandardErrors(false))
 ```
 
+### WithStackTrace
+
+Include captured stack traces in the serialized output. The default is `true`; pass
+`false` to omit the `stack_trace` field. This is separate from `WithMaxStackFrames(0)`,
+which means no frame limit.
+
+```go
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithStackTrace(false))
+```
+
+### WithAttributes
+
+Include structured attributes in the output. The default is `true`; pass `false` to omit
+the `attributes` field, for example when attributes may contain sensitive data.
+
+```go
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithAttributes(false))
+```
+
+### WithSentinels
+
+Include sentinel text in the output. The default is `true`; pass `false` to omit the
+`sentinels` field when those messages are internal implementation details.
+
+```go
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithSentinels(false))
+```
+
+### WithAttributeValueTransformer
+
+Rewrite or redact each attribute value during serialization. The transformer receives the
+attribute key and value, and is called only when attributes are included.
+
+Note that this only transforms values in the `attributes` field, not in `message`. For example,
+serializing `errx.Attrs("token", "secret")` with this transformer still includes `"message": "token=secret"`.
+Similarly, `WithAttributes(false)` only suppresses the `attributes` field, leaving the message intact.
+Neither option guarantees that sensitive values are omitted from the serialized JSON if they are present in the error message.
+
+```go
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithAttributeValueTransformer(
+    func(key string, value any) any {
+        if key == "token" {
+            return "[redacted]"
+        }
+        return value
+    },
+))
+```
+
+### WithStackTraceTrimPaths
+
+Remove a prefix from each stack frame's file path. An empty prefix (the default) leaves
+paths unchanged.
+
+```go
+jsonBytes, _ := errxjson.Marshal(err,
+    errxjson.WithStackTraceTrimPaths("/home/runner/work/myproject/"))
+```
+
+### WithMaxMessageBytes
+
+Limit each serialized error message to at most `n` bytes. When truncation is needed, the
+suffix `...(truncated)` is appended without splitting a UTF-8 character. If `n` is 14
+bytes or less (the length of the suffix), a hard cut at the byte limit is used instead
+without appending the suffix. The default `0` leaves messages unchanged.
+
+```go
+jsonBytes, _ := errxjson.Marshal(err, errxjson.WithMaxMessageBytes(256))
+```
+
 ## JSON Structure
 
 The serialized error has the following structure:
