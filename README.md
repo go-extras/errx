@@ -181,6 +181,9 @@ need to tag it; use `Wrap` when you also want to add context about where/why it 
 #### Hierarchical sentinels
 
 Pass parent sentinels to build a taxonomy. A child matches itself *and* every parent.
+`errx.SentinelParents(child)` returns its direct parents for inspection; treat the returned
+slice as read-only. The JSON serializer keeps direct values in `sentinels` and writes the
+flattened, deduplicated hierarchy to `sentinel_ancestors`.
 
 ```go
 var (
@@ -636,6 +639,8 @@ when you need to pass plain `error` values.
 
 ### Inspection
 
+- **`SentinelParents(c Classified) []Classified`** — direct parents of an errx sentinel;
+  returns nil for other classifications. Treat the returned slice as read-only.
 - **`IsDisplayable(err error) bool`** / **`DisplayText(err error) string`**
 - **`DisplayTextDefault(err error, def string) string`** — fallback on a miss.
 - **`DisplayTextOrEmpty(err error) string`** — `""` on a miss; safe for user surfaces.

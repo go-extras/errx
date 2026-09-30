@@ -209,6 +209,48 @@ func TestMarshal_HierarchicalSentinels(t *testing.T) {
 	}
 }
 
+func TestMarshal_HierarchicalSentinelAncestors(t *testing.T) {
+	shared := errx.NewSentinel("shared")
+	left := errx.NewSentinel("left", shared)
+	right := errx.NewSentinel("right", shared)
+	child := errx.NewSentinel("child", left, right)
+	testErr := errx.Classify(errors.New("hierarchical error"), child)
+
+	data, err := errxjson.Marshal(testErr)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if got, want := fmt.Sprint(result.Sentinels), "[child]"; got != want {
+		t.Errorf("Sentinels = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(result.SentinelAncestors), "[left shared right]"; got != want {
+		t.Errorf("SentinelAncestors = %s, want %s", got, want)
+	}
+}
+
+func TestMarshal_WithSentinelsFalseOmitsAncestors(t *testing.T) {
+	root := errx.NewSentinel("root")
+	child := errx.NewSentinel("child", root)
+	data, err := errxjson.Marshal(
+		errx.Classify(errors.New("error"), child),
+		errxjson.WithSentinels(false),
+	)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if len(result.Sentinels) != 0 || len(result.SentinelAncestors) != 0 {
+		t.Errorf("sentinel fields should be omitted, got sentinels=%v ancestors=%v", result.Sentinels, result.SentinelAncestors)
+	}
+}
+
 func TestMarshal_ComplexError(t *testing.T) {
 	// Create a complex error with all features
 	baseErr := errors.New("connection failed")
@@ -249,8 +291,14 @@ func TestMarshal_ComplexError(t *testing.T) {
 	if len(result.Sentinels) != 0 {
 		t.Errorf("top-level Sentinels = %v, want empty (sentinel attached at inner level)", result.Sentinels)
 	}
+	if len(result.SentinelAncestors) != 0 {
+		t.Errorf("top-level SentinelAncestors = %v, want empty (sentinel attached at inner level)", result.SentinelAncestors)
+	}
 	if result.Cause == nil {
 		t.Fatal("Cause is nil; sentinel should be reported at this level")
+	}
+	if got, want := fmt.Sprint(result.Cause.SentinelAncestors), "[database retryable]"; got != want {
+		t.Errorf("Cause.SentinelAncestors = %s, want %s", got, want)
 	}
 	gotTimeout := false
 	for _, s := range result.Cause.Sentinels {
