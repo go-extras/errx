@@ -43,6 +43,9 @@ type SerializedError struct {
 	// Sentinels lists all classification sentinel texts found in this error
 	Sentinels []string `json:"sentinels,omitempty"`
 
+	// SentinelAncestors lists the deduplicated parent sentinel texts for this error level.
+	SentinelAncestors []string `json:"sentinel_ancestors,omitempty"`
+
 	// Attributes contains structured key-value pairs attached to this error
 	Attributes []SerializedAttr `json:"attributes,omitempty"`
 
@@ -271,6 +274,7 @@ func toSerializedError(err error, cfg *config, visited *visitedSet, depth int) *
 	// classifications and the node itself (if it's a pure sentinel) count.
 	if cfg.includeSentinels {
 		result.Sentinels = sentinelsForLevel(levelCls, node)
+		result.SentinelAncestors = sentinelAncestorsForLevel(levelCls, node)
 	}
 
 	// Attributes: chain-wide (errx.ExtractAttrs walks the chain).
@@ -360,6 +364,61 @@ func sentinelsForLevel(classifications []errx.Classified, node error) []string {
 	addSelfAsPureSentinel(node, &sentinels, &seen)
 
 	return sentinels
+}
+
+// sentinelAncestorsForLevel returns the pure-sentinel parents of the
+// classifications attached to this error level or represented by its node.
+// Parents are traversed depth-first in declaration order and deduplicated by text.
+func sentinelAncestorsForLevel(classifications []errx.Classified, node error) []string {
+	var ancestors []string
+	var seenTexts map[string]bool
+	var visited map[errx.Classified]bool
+
+	for _, cls := range classifications {
+		if isPureSentinel(cls) {
+			addSentinelParents(cls, &ancestors, &seenTexts, &visited)
+		}
+	}
+	if cls, ok := node.(errx.Classified); ok && isPureSentinel(cls) {
+		addSentinelParents(cls, &ancestors, &seenTexts, &visited)
+	}
+
+	return ancestors
+}
+
+// addSentinelParents appends pure-sentinel parents and their ancestors,
+// guarding against repeated sentinels and malformed cycles.
+func addSentinelParents(
+	cls errx.Classified,
+	ancestors *[]string,
+	seenTexts *map[string]bool,
+	visited *map[errx.Classified]bool,
+) {
+	parents := errx.SentinelParents(cls)
+	if len(parents) == 0 {
+		return
+	}
+
+	// SentinelParents only returns a non-empty slice for the internal,
+	// pointer-backed sentinel type, which is safe to use as a map key.
+	if *visited == nil {
+		*visited = make(map[errx.Classified]bool)
+	}
+	if (*visited)[cls] {
+		return
+	}
+	(*visited)[cls] = true
+
+	for _, parent := range parents {
+		if !isPureSentinel(parent) {
+			continue
+		}
+		text := parent.Error()
+		if !rememberSentinel(text, seenTexts) {
+			*ancestors = append(*ancestors, text)
+		}
+		addSentinelParents(parent, ancestors, seenTexts, visited)
+	}
 }
 
 // serializeAttributes extracts and serializes attributes from an error.
