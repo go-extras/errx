@@ -108,7 +108,8 @@ jsonBytes, _ := errxjson.Marshal(err, errxjson.WithAttributes(false))
 ### WithSentinels
 
 Include sentinel text in the output. The default is `true`; pass `false` to omit the
-`sentinels` field when those messages are internal implementation details.
+`sentinels` and `sentinel_ancestors` fields when those messages are internal
+implementation details.
 
 ```go
 jsonBytes, _ := errxjson.Marshal(err, errxjson.WithSentinels(false))
@@ -165,6 +166,7 @@ The serialized error has the following structure:
   "message": "error message from Error()",
   "display_text": "user-facing message (if displayable error present)",
   "sentinels": ["list", "of", "sentinel", "texts"],
+  "sentinel_ancestors": ["parent", "grandparent"],
   "attributes": [
     {"key": "user_id", "value": 123},
     {"key": "action", "value": "delete"}
@@ -195,6 +197,11 @@ sentinel. Standalone errors still retain their `Error()` text in `message`.
 Sentinels with attributed or traced parents keep their own sentinel text;
 classifications with a displayable anywhere in their chain remain excluded from
 `sentinels` and provide `display_text` instead.
+
+The `sentinel_ancestors` field contains pure-sentinel parents of the direct sentinels
+at that serialized error level. It traverses parents depth-first in declaration order
+and deduplicates by text; parents attached to a cause appear on that cause rather
+than leaking into the outer error. `WithSentinels(false)` omits both sentinel fields.
 
 ## Examples
 
@@ -292,5 +299,5 @@ json.Unmarshal(jsonBytes, &serialized)
 ## Limitations
 
 - **No Deserialization**: This package does not provide deserialization (JSON to error) functionality. Errors are runtime constructs and cannot be meaningfully reconstructed from JSON.
-- **Sentinel Hierarchy**: Parent sentinels in hierarchical relationships are not serialized - only direct sentinels are included.
+- **Sentinel Hierarchy**: Parent sentinels are included in the `sentinel_ancestors` field; the `sentinels` field continues to contain only direct classifications.
 - **Attribute Ordering**: The order of attributes in the JSON output is stable for a given error but should not be relied upon for semantic meaning.

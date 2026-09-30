@@ -270,6 +270,18 @@ func NewSentinel(text string, parents ...Classified) Classified {
 	return &sentinel{text: text, parents: parents}
 }
 
+// SentinelParents returns the direct parents of c when c is an errx sentinel.
+// It returns nil when c is nil or is not a sentinel.
+//
+// The returned slice aliases internal storage and must be treated as read-only.
+func SentinelParents(c Classified) []Classified {
+	s, ok := c.(*sentinel)
+	if !ok || s == nil {
+		return nil
+	}
+	return s.parents
+}
+
 // Wrap wraps an error with additional context text and optional classification sentinels.
 // The attached classification sentinels can be used later to identify the error using errors.Is,
 // as well as add displayable errors.

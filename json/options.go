@@ -116,7 +116,7 @@ func WithAttributes(include bool) Option {
 //
 // Use WithSentinels(false) when the sentinel text is considered internal
 // implementation detail that should not appear in serialized output. Suppresses
-// the "sentinels" field.
+// the "sentinels" and "sentinel_ancestors" fields.
 //
 // Example:
 //
