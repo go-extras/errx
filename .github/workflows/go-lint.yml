@@ -35,7 +35,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           args: --timeout=30m
-          version: v2.13.2
+          version: v2.15.0
 
       - name: Run govulncheck
         run: |
