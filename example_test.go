@@ -30,6 +30,18 @@ func Example() {
 	// Error is classified as not found
 }
 
+func ExampleSentinelParents() {
+	ErrDatabase := errx.NewSentinel("database")
+	ErrTimeout := errx.NewSentinel("timeout", ErrDatabase)
+
+	for _, parent := range errx.SentinelParents(ErrTimeout) {
+		fmt.Println(parent.Error())
+	}
+
+	// Output:
+	// database
+}
+
 // ExampleWrap demonstrates wrapping errors with context and tags
 func ExampleWrap() {
 	ErrDatabase := errx.NewSentinel("database error")

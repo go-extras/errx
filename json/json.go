@@ -43,6 +43,9 @@ type SerializedError struct {
 	// Sentinels lists all classification sentinel texts found in this error
 	Sentinels []string `json:"sentinels,omitempty"`
 
+	// SentinelAncestors lists the deduplicated parent sentinel texts for this error level.
+	SentinelAncestors []string `json:"sentinel_ancestors,omitempty"`
+
 	// Attributes contains structured key-value pairs attached to this error
 	Attributes []SerializedAttr `json:"attributes,omitempty"`
 
@@ -271,6 +274,7 @@ func toSerializedError(err error, cfg *config, visited *visitedSet, depth int) *
 	// classifications and the node itself (if it's a pure sentinel) count.
 	if cfg.includeSentinels {
 		result.Sentinels = sentinelsForLevel(levelCls, node)
+		result.SentinelAncestors = sentinelAncestorsForLevel(levelCls, node)
 	}
 
 	// Attributes: chain-wide (errx.ExtractAttrs walks the chain).
@@ -360,6 +364,64 @@ func sentinelsForLevel(classifications []errx.Classified, node error) []string {
 	addSelfAsPureSentinel(node, &sentinels, &seen)
 
 	return sentinels
+}
+
+// sentinelAncestorsForLevel returns the pure-sentinel parents of the
+// classifications attached to this error level or represented by its node.
+// Parents are traversed depth-first in declaration order and deduplicated by text.
+func sentinelAncestorsForLevel(classifications []errx.Classified, node error) []string {
+	var ancestors []string
+	var seenTexts map[string]bool
+	var visited map[errx.Classified]bool
+
+	for _, cls := range classifications {
+		if isPureSentinel(cls) {
+			addSentinelParents(cls, &ancestors, &seenTexts, &visited)
+		}
+	}
+	if cls, ok := node.(errx.Classified); ok && isPureSentinel(cls) {
+		addSentinelParents(cls, &ancestors, &seenTexts, &visited)
+	}
+
+	return ancestors
+}
+
+// addSentinelParents appends pure-sentinel parents and their ancestors,
+// guarding against repeated sentinels and malformed cycles.
+func addSentinelParents(
+	cls errx.Classified,
+	ancestors *[]string,
+	seenTexts *map[string]bool,
+	visited *map[errx.Classified]bool,
+) {
+	parents := errx.SentinelParents(cls)
+	if len(parents) == 0 {
+		return
+	}
+
+	// SentinelParents only returns a non-empty slice for the internal,
+	// pointer-backed sentinel type, which is safe to use as a map key.
+	if *visited == nil {
+		*visited = make(map[errx.Classified]bool)
+	}
+	if (*visited)[cls] {
+		return
+	}
+	(*visited)[cls] = true
+
+	for _, parent := range parents {
+		// The root passed the chain-wide displayable check before this walk.
+		// Every reachable parent is therefore non-displayable, so checking
+		// its own kind is enough and avoids rescanning its entire subtree.
+		if !isPureSentinelKind(parent) {
+			continue
+		}
+		text := parent.Error()
+		if !rememberSentinel(text, seenTexts) {
+			*ancestors = append(*ancestors, text)
+		}
+		addSentinelParents(parent, ancestors, seenTexts, visited)
+	}
 }
 
 // serializeAttributes extracts and serializes attributes from an error.
@@ -541,18 +603,24 @@ func addPureSentinels(classifications []errx.Classified, sentinels *[]string, se
 	}
 }
 
-// isPureSentinel excludes attribute and trace carriers by their own type,
+// isPureSentinelKind excludes attribute and trace carriers by their own type,
 // including empty external implementations. An attributed or traced parent
-// does not change a sentinel's kind. Displayable detection remains chain-wide
-// because errx does not yet expose a displayable-kind interface.
-func isPureSentinel(cls errx.Classified) bool {
+// does not change a sentinel's kind.
+func isPureSentinelKind(cls errx.Classified) bool {
 	// Use the public attribute interface here when issue #63 introduces it.
 	switch cls.(type) {
 	case interface{ Attrs() []errx.Attr }, stacktrace.Tracer:
 		return false
 	default:
-		return !errx.IsDisplayable(cls)
+		return true
 	}
+}
+
+// isPureSentinel also excludes classifications with a displayable anywhere in
+// their chain. Detection remains chain-wide because errx does not yet expose
+// a displayable-kind interface.
+func isPureSentinel(cls errx.Classified) bool {
+	return isPureSentinelKind(cls) && !errx.IsDisplayable(cls)
 }
 
 // addSelfAsPureSentinel checks if the error itself is a pure sentinel and adds it.

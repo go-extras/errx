@@ -20,6 +20,26 @@ func TestNewSentinel(t *testing.T) {
 	}
 }
 
+func TestSentinelParents(t *testing.T) {
+	root := errx.NewSentinel("root")
+	parent := errx.NewSentinel("parent", root)
+	child := errx.NewSentinel("child", parent)
+
+	parents := errx.SentinelParents(child)
+	if len(parents) != 1 || parents[0] != parent {
+		t.Fatalf("SentinelParents(child) = %v, want [parent]", parents)
+	}
+	if got := errx.SentinelParents(root); got != nil {
+		t.Errorf("SentinelParents(root) = %v, want nil", got)
+	}
+	if got := errx.SentinelParents(errx.NewDisplayable("display")); got != nil {
+		t.Errorf("SentinelParents(displayable) = %v, want nil", got)
+	}
+	if got := errx.SentinelParents(nil); got != nil {
+		t.Errorf("SentinelParents(nil) = %v, want nil", got)
+	}
+}
+
 // TestWrapWithTag tests wrapping with a classification tag
 func TestWrapWithTag(t *testing.T) {
 	tag := errx.NewSentinel("tag error")
