@@ -183,7 +183,7 @@ need to tag it; use `Wrap` when you also want to add context about where/why it 
 Pass parent sentinels to build a taxonomy. A child matches itself *and* every parent.
 `errx.SentinelParents(child)` returns its direct parents for inspection; treat the returned
 slice as read-only. The JSON serializer keeps direct values in `sentinels` and writes the
-flattened, deduplicated hierarchy to `sentinel_ancestors`.
+flattened, deduplicated parent texts to `sentinel_ancestors`.
 
 ```go
 var (

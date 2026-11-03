@@ -232,6 +232,69 @@ func TestMarshal_HierarchicalSentinelAncestors(t *testing.T) {
 	}
 }
 
+func TestMarshal_SentinelAncestorsDeduplicateTextWithoutSkippingBranches(t *testing.T) {
+	a := errx.NewSentinel("a")
+	b := errx.NewSentinel("b")
+	left := errx.NewSentinel("same", a)
+	right := errx.NewSentinel("same", b)
+	child := errx.NewSentinel("child", left, right)
+
+	result := errxjson.ToSerializedError(errx.Classify(errors.New("base"), child))
+	if got, want := fmt.Sprint(result.Sentinels), "[child]"; got != want {
+		t.Errorf("Sentinels = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(result.SentinelAncestors), "[same a b]"; got != want {
+		t.Errorf("SentinelAncestors = %s, want %s", got, want)
+	}
+}
+
+func TestMarshal_HierarchicalSentinelNode(t *testing.T) {
+	root := errx.NewSentinel("root")
+	child := errx.NewSentinel("child", root)
+
+	data, err := errxjson.Marshal(child)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var result errxjson.SerializedError
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if got, want := fmt.Sprint(result.Sentinels), "[child]"; got != want {
+		t.Errorf("Sentinels = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(result.SentinelAncestors), "[root]"; got != want {
+		t.Errorf("SentinelAncestors = %s, want %s", got, want)
+	}
+}
+
+func TestMarshal_SentinelAncestorsFilterMetadataParents(t *testing.T) {
+	root := errx.NewSentinel("root")
+	child := errx.NewSentinel("child", root, errx.Attrs("key", "value"), stacktrace.Here())
+
+	result := errxjson.ToSerializedError(errx.Classify(errors.New("base"), child))
+	if got, want := fmt.Sprint(result.Sentinels), "[child]"; got != want {
+		t.Errorf("Sentinels = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(result.SentinelAncestors), "[root]"; got != want {
+		t.Errorf("SentinelAncestors = %s, want %s", got, want)
+	}
+}
+
+func TestMarshal_SentinelAncestorsExcludeDisplayableChain(t *testing.T) {
+	root := errx.NewSentinel("root")
+	displayable := errx.NewDisplayable("public message")
+	child := errx.NewSentinel("child", root, displayable)
+
+	result := errxjson.ToSerializedError(errx.Classify(errors.New("base"), child))
+	if len(result.Sentinels) != 0 || len(result.SentinelAncestors) != 0 {
+		t.Errorf("sentinel fields = %v, %v; want empty", result.Sentinels, result.SentinelAncestors)
+	}
+	if result.DisplayText != "public message" {
+		t.Errorf("DisplayText = %q, want public message", result.DisplayText)
+	}
+}
+
 func TestMarshal_WithSentinelsFalseOmitsAncestors(t *testing.T) {
 	root := errx.NewSentinel("root")
 	child := errx.NewSentinel("child", root)

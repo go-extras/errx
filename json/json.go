@@ -410,7 +410,10 @@ func addSentinelParents(
 	(*visited)[cls] = true
 
 	for _, parent := range parents {
-		if !isPureSentinel(parent) {
+		// The root passed the chain-wide displayable check before this walk.
+		// Every reachable parent is therefore non-displayable, so checking
+		// its own kind is enough and avoids rescanning its entire subtree.
+		if !isPureSentinelKind(parent) {
 			continue
 		}
 		text := parent.Error()
@@ -600,18 +603,24 @@ func addPureSentinels(classifications []errx.Classified, sentinels *[]string, se
 	}
 }
 
-// isPureSentinel excludes attribute and trace carriers by their own type,
+// isPureSentinelKind excludes attribute and trace carriers by their own type,
 // including empty external implementations. An attributed or traced parent
-// does not change a sentinel's kind. Displayable detection remains chain-wide
-// because errx does not yet expose a displayable-kind interface.
-func isPureSentinel(cls errx.Classified) bool {
+// does not change a sentinel's kind.
+func isPureSentinelKind(cls errx.Classified) bool {
 	// Use the public attribute interface here when issue #63 introduces it.
 	switch cls.(type) {
 	case interface{ Attrs() []errx.Attr }, stacktrace.Tracer:
 		return false
 	default:
-		return !errx.IsDisplayable(cls)
+		return true
 	}
+}
+
+// isPureSentinel also excludes classifications with a displayable anywhere in
+// their chain. Detection remains chain-wide because errx does not yet expose
+// a displayable-kind interface.
+func isPureSentinel(cls errx.Classified) bool {
+	return isPureSentinelKind(cls) && !errx.IsDisplayable(cls)
 }
 
 // addSelfAsPureSentinel checks if the error itself is a pure sentinel and adds it.

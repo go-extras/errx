@@ -299,5 +299,5 @@ json.Unmarshal(jsonBytes, &serialized)
 ## Limitations
 
 - **No Deserialization**: This package does not provide deserialization (JSON to error) functionality. Errors are runtime constructs and cannot be meaningfully reconstructed from JSON.
-- **Sentinel Hierarchy**: Parent sentinels are included in the `sentinel_ancestors` field; the `sentinels` field continues to contain only direct classifications.
+- **Sentinel Hierarchy**: `sentinel_ancestors` preserves a flattened, deduplicated list of parent texts, while `sentinels` contains direct classifications. The JSON does not identify which direct sentinel owns each parent, preserve parent-child edges, or distinguish sentinels with the same text. A future registry-backed decoder could resolve known texts to local sentinels, but this payload cannot reconstruct the original graph.
 - **Attribute Ordering**: The order of attributes in the JSON output is stable for a given error but should not be relied upon for semantic meaning.

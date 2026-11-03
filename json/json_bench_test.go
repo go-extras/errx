@@ -71,3 +71,24 @@ func BenchmarkMarshal_FreshStackTrace(b *testing.B) {
 		_, _ = errxjson.Marshal(err)
 	}
 }
+
+// BenchmarkMarshal_SentinelAncestorDAG guards against repeatedly searching
+// each parent's subtree while collecting ancestors. The shared leaf is the
+// first parent, and each new sentinel also points to the previous one.
+func BenchmarkMarshal_SentinelAncestorDAG(b *testing.B) {
+	for _, depth := range []int{32, 64, 128} {
+		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
+			leaf := errx.NewSentinel("leaf")
+			current := leaf
+			for i := 0; i < depth; i++ {
+				current = errx.NewSentinel(fmt.Sprintf("node_%d", i), leaf, current)
+			}
+			err := errx.Classify(errors.New("base"), current)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, _ = errxjson.Marshal(err)
+			}
+		})
+	}
+}

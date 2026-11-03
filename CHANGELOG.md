@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **JSON serializes hierarchical sentinel parents** ([#59]) — adds the public
   `SentinelParents` accessor and an additive `sentinel_ancestors` JSON field containing
   flattened, deduplicated parent sentinel texts while preserving the existing `sentinels` field.
+  The new field preserves ancestor membership, not the parent-child graph.
 
 - **Repository community health and security governance** ([#67]) — adds `SECURITY.md` defining supported release lines and private vulnerability reporting, adds `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1), and updates `CONTRIBUTING.md` references.
 
